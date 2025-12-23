@@ -14,7 +14,7 @@ if str(BASE_DIR_PARENT) not in sys.path:
 
 def run_api_server():
     try:
-        from AIgen.api_server import run_api_server
+        from api_server import run_api_server
         run_api_server(port=8000)
     except ImportError:
         try:

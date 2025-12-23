@@ -313,6 +313,8 @@ def main():
             st.session_state.db_data = None
         if "db_refresh_key" not in st.session_state:
             st.session_state.db_refresh_key = 0
+        if "tab3_should_load" not in st.session_state:
+            st.session_state.tab3_should_load = False
         
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -325,12 +327,14 @@ def main():
             if selected_collection != st.session_state.selected_collection:
                 st.session_state.selected_collection = selected_collection
                 st.session_state.db_data = None
+                st.session_state.tab3_should_load = True
                 st.rerun()
         
         with col2:
             if st.button("刷新数据", key="refresh_db"):
                 st.session_state.db_data = None
                 st.session_state.db_refresh_key += 1
+                st.session_state.tab3_should_load = True
                 st.rerun()
         
         if st.session_state.selected_collection == "knowledge":
@@ -346,6 +350,7 @@ def main():
                             if result.get("success"):
                                 st.success(f"✓ 已更新 {result.get('count', 0)} 条记录")
                                 st.session_state.db_data = None
+                                st.session_state.tab3_should_load = True
                                 st.rerun()
                             else:
                                 st.error(f"更新失败: {result.get('message', '未知错误')}")
@@ -356,7 +361,16 @@ def main():
         
         st.markdown("---")
         
-        if st.session_state.db_data is None or st.session_state.db_refresh_key > 0:
+        # 只在明确需要加载数据时才执行 API 请求
+        # tab3_should_load 标志确保只在用户明确操作（如切换集合、刷新等）时才加载
+        # 这样可以避免在 rerun 时（如点击"开始新任务"）不必要地加载数据
+        # 如果 db_data 是 None 且 tab3_should_load 是 False，说明是首次访问，也应该加载
+        should_load = (
+            st.session_state.tab3_should_load or 
+            (st.session_state.db_data is None and not st.session_state.tab3_should_load)
+        ) and (st.session_state.db_data is None or st.session_state.db_refresh_key > 0)
+        
+        if should_load:
             with st.spinner("正在加载数据..."):
                 try:
                     response = requests.get(
@@ -369,6 +383,7 @@ def main():
                         if result.get("success"):
                             st.session_state.db_data = result
                             st.session_state.db_refresh_key = 0
+                            st.session_state.tab3_should_load = False  # 数据加载完成，重置标志
                         else:
                             st.error("获取数据失败")
                     else:

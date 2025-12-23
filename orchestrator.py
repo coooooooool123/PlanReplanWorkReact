@@ -1,8 +1,8 @@
 from typing import Dict
-from .plan import PlanModule
-from .replan import ReplanModule
-from .work.agent import WorkAgent
-from .context_manager import ContextManager
+from plan import PlanModule
+from replan import ReplanModule
+from work.agent import WorkAgent
+from context_manager import ContextManager
 
 
 class Orchestrator:

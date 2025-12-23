@@ -1,7 +1,7 @@
 from typing import Dict, List, Any
-from .tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool
-from ..context_manager import ContextManager
-from ..config import LLM_CONFIG
+from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool
+from context_manager import ContextManager
+from config import LLM_CONFIG
 import requests
 import json
 

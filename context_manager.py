@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
-from .config import PATHS, CHROMA_CONFIG, EMBEDDING_MODEL, RAG_CONFIG
+from config import PATHS, CHROMA_CONFIG, EMBEDDING_MODEL, RAG_CONFIG
 
 
 class ContextManager:

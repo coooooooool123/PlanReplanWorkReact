@@ -1,5 +1,5 @@
 from typing import Dict
-from ..orchestrator import Orchestrator
+from orchestrator import Orchestrator
 
 
 class APIRoutes:

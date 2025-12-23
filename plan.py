@@ -1,6 +1,6 @@
 from typing import Dict
-from .context_manager import ContextManager
-from .config import LLM_CONFIG
+from context_manager import ContextManager
+from config import LLM_CONFIG
 import requests
 import json
 

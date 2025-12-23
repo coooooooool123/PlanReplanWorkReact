@@ -24,9 +24,9 @@ except ImportError:
     BASE_DIR_PARENT = BASE_DIR.parent
     if str(BASE_DIR_PARENT) not in sys.path:
         sys.path.insert(0, str(BASE_DIR_PARENT))
-    from AIgen.orchestrator import Orchestrator
-    from AIgen.context_manager import ContextManager
-    from AIgen.config import CHROMA_CONFIG
+    from orchestrator import Orchestrator
+    from context_manager import ContextManager
+    from config import CHROMA_CONFIG
 
 app = FastAPI(
     title="空地智能体API服务",
