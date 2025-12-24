@@ -217,16 +217,12 @@ class ContextManager:
         }
         return compressed
     
-    def update_knowledge_base(self):
-        """更新knowledge集合，清除旧数据并重新初始化军事单位部署规则"""
-        try:
-            knowledge_coll = self.chroma_client.get_collection(CHROMA_CONFIG["collection_knowledge"])
-            existing_ids = knowledge_coll.get()["ids"]
-            
-            if existing_ids:
-                knowledge_coll.delete(ids=existing_ids)
-            
-            military_units = [
+    def _get_military_units_rules(self) -> List[Dict]:
+        """获取军事单位部署规则列表
+        
+        注意：如果要修改部署规则，请修改此方法，然后运行 update_knowledge.py 更新数据库
+        """
+        return [
                 {
                     "text": "轻步兵适合部署在中等高程区域，地形起伏不大，坡度以缓坡或平缓地形为主。配置位置应与居民区保持100-300米的缓冲距离，既能避免直接暴露于民用区域，又便于利用建筑边缘与自然掩体展开机动作战。",
                     "metadata": {"unit": "轻步兵", "type": "deployment_rule"}
@@ -288,6 +284,17 @@ class ContextManager:
                     "metadata": {"unit": "无人机侦察控制单元", "type": "deployment_rule"}
                 }
             ]
+    
+    def update_knowledge_base(self):
+        """更新knowledge集合，清除旧数据并重新初始化军事单位部署规则"""
+        try:
+            knowledge_coll = self.chroma_client.get_collection(CHROMA_CONFIG["collection_knowledge"])
+            existing_ids = knowledge_coll.get()["ids"]
+            
+            if existing_ids:
+                knowledge_coll.delete(ids=existing_ids)
+            
+            military_units = self._get_military_units_rules()
             
             for i, unit in enumerate(military_units):
                 embedding = self.embedding_model.encode(unit["text"]).tolist()
@@ -324,68 +331,7 @@ class ContextManager:
                 knowledge_coll.delete(ids=existing_knowledge_ids)
         
         if should_init:
-            military_units = [
-                {
-                    "text": "轻步兵适合部署在中等高程区域，地形起伏不大，坡度以缓坡或平缓地形为主。配置位置应与居民区保持100-300米的缓冲距离，既能避免直接暴露于民用区域，又便于利用建筑边缘与自然掩体展开机动作战。",
-                    "metadata": {"unit": "轻步兵", "type": "deployment_rule"}
-                },
-                {
-                    "text": "重装步兵适合配置在较低至中等高程的防御阵地，坡度不宜过大，以平缓或中等坡度为宜。部署位置通常与居民区保持200-500米缓冲距离，确保火力展开空间，同时避免对居民区造成直接影响。",
-                    "metadata": {"unit": "重装步兵", "type": "deployment_rule"}
-                },
-                {
-                    "text": "机械化步兵更适合部署在中等高程的过渡地带，坡度应保持在低至中等坡度范围，以保障装甲车辆通行。配置位置与居民区的缓冲距离建议控制在300-600米之间，兼顾快速机动与战场安全。",
-                    "metadata": {"unit": "机械化步兵", "type": "deployment_rule"}
-                },
-                {
-                    "text": "坦克部队适合部署在低至中等高程的开阔区域，整体坡度应尽量平缓，避免复杂起伏影响机动。配置位置通常要求与居民区保持500-1000米缓冲距离，减少城市地形对装甲单位的限制。",
-                    "metadata": {"unit": "坦克部队", "type": "deployment_rule"}
-                },
-                {
-                    "text": "反坦克步兵适合部署在中等至较高高程的伏击位置，坡度可为中等坡度或局部陡坡，便于形成俯射角度。与居民区之间应保持150-400米缓冲距离，既能隐蔽部署，又不靠近高密度民用区域。",
-                    "metadata": {"unit": "反坦克步兵", "type": "deployment_rule"}
-                },
-                {
-                    "text": "自行火炮通常部署在中等高程或背坡地形，坡度以缓坡为主，利于火炮稳定展开。配置位置与居民区应保持600-1000米缓冲距离，以确保安全并减少反侦察风险。",
-                    "metadata": {"unit": "自行火炮", "type": "deployment_rule"}
-                },
-                {
-                    "text": "牵引火炮适合配置在相对固定的中低高程阵地，地形坡度应较小且稳定。与居民区的缓冲距离一般控制在400-800米之间，确保持续火力覆盖而不干扰民用区域。",
-                    "metadata": {"unit": "牵引火炮", "type": "deployment_rule"}
-                },
-                {
-                    "text": "防空部队适合部署在中等至较高高程位置，坡度以平缓或中等坡度为宜，保证雷达与火力视野。部署点与居民区的缓冲距离建议为300-700米，既保证空域覆盖，又降低暴露风险。",
-                    "metadata": {"unit": "防空部队", "type": "deployment_rule"}
-                },
-                {
-                    "text": "狙击手适合配置在较高高程制高点，局部坡度可为中等或陡坡，形成良好射界。配置位置通常与居民区保持50-200米缓冲距离，便于利用城市边缘地形进行隐蔽观察。",
-                    "metadata": {"unit": "狙击手", "type": "deployment_rule"}
-                },
-                {
-                    "text": "特种部队适合部署在高程变化明显的复杂地形，坡度可从缓坡到陡坡不等，以增加行动隐蔽性。与居民区之间宜保持200-500米缓冲距离，确保渗透行动不暴露于高密度区域。",
-                    "metadata": {"unit": "特种部队", "type": "deployment_rule"}
-                },
-                {
-                    "text": "装甲侦察单位适合部署在中低高程区域，整体坡度应较为平缓，便于快速进出。配置位置与居民区的缓冲距离一般为300-600米，以降低被发现概率。",
-                    "metadata": {"unit": "装甲侦察单位", "type": "deployment_rule"}
-                },
-                {
-                    "text": "工兵部队多部署在中低高程的关键节点区域，坡度应相对平缓，方便工程作业。与居民区保持100-400米缓冲距离，既便于保障基础设施，又避免过度靠近居民区。",
-                    "metadata": {"unit": "工兵部队", "type": "deployment_rule"}
-                },
-                {
-                    "text": "后勤保障部队适合部署在低高程、安全区域，坡度应平缓稳定，便于物资运输。配置位置通常与居民区保持500-1000米缓冲距离，减少战场干扰风险。",
-                    "metadata": {"unit": "后勤保障部队", "type": "deployment_rule"}
-                },
-                {
-                    "text": "指挥单位适合部署在中等高程、地形相对隐蔽的位置，坡度以缓坡或平台地形为宜。与居民区之间的缓冲距离通常控制在300-600米，在安全与通信效率之间取得平衡。",
-                    "metadata": {"unit": "指挥单位", "type": "deployment_rule"}
-                },
-                {
-                    "text": "无人机侦察控制单元适合部署在中高高程区域，坡度应较小，确保设备稳定运行。与居民区保持400-800米缓冲距离，避免电磁与安全干扰。",
-                    "metadata": {"unit": "无人机侦察控制单元", "type": "deployment_rule"}
-                }
-            ]
+            military_units = self._get_military_units_rules()
             
             for i, unit in enumerate(military_units):
                 embedding = self.embedding_model.encode(unit["text"]).tolist()
