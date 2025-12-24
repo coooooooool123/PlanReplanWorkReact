@@ -24,9 +24,13 @@ class ReplanModule:
         tools_info_str = json.dumps(tools_info, ensure_ascii=False, indent=2)
         prompt = prompt_template.format(tools_info=tools_info_str)
         
+        plan_str = json.dumps(original_plan, ensure_ascii=False, indent=2)
+        result_str = json.dumps(work_result, ensure_ascii=False, indent=2)
+        user_content = f"请根据原计划和执行结果重写 JSON 计划\n\n原计划:\n{plan_str}\n\n执行结果:\n{result_str}"
+        
         messages = [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": f"原计划: {json.dumps(original_plan, ensure_ascii=False)}\n执行结果: {json.dumps(work_result, ensure_ascii=False)}\n可用工具: {tools_info_str}"}
+            {"role": "user", "content": user_content}
         ]
         
         response = self._call_llm(messages)
@@ -68,7 +72,7 @@ class ReplanModule:
                 prompt = prompt_template.replace("{tools_info}", tools_info_str)
             
             plan_str = json.dumps(original_plan, ensure_ascii=False, indent=2)
-            user_content = f"原计划:\n{plan_str}\n\n用户反馈: {feedback}\n\n可用工具:\n{tools_info_str}"
+            user_content = f"请根据原计划和用户反馈重写 JSON 计划\n\n原计划:\n{plan_str}\n\n用户反馈:\n{feedback}"
             
             messages = [
                 {"role": "system", "content": prompt},
