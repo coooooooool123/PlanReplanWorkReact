@@ -10,7 +10,8 @@ LLM_CONFIG = {
     "max_tokens": 2000,
     "top_p": 1.0,
     "n": 1,
-    "stream": False
+    "stream": False,
+    "timeout": 180
 }
 
 PATHS = {
@@ -26,7 +27,8 @@ CHROMA_CONFIG = {
     "persist_directory": str(PATHS["chroma_db_dir"]),
     "collection_tasks": "tasks",
     "collection_executions": "executions",
-    "collection_knowledge": "knowledge"
+    "collection_knowledge": "knowledge",
+    "collection_equipment": "equipment"
 }
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"

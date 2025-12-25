@@ -24,9 +24,22 @@ class ReplanModule:
         tools_info_str = json.dumps(tools_info, ensure_ascii=False, indent=2)
         prompt = prompt_template.format(tools_info=tools_info_str)
         
+        # 检索装备信息（含射程），用于重新规划时考虑射程因素
+        plan_text = json.dumps(original_plan, ensure_ascii=False)
+        rag_equipment = self.context_manager.load_dynamic_context(
+            plan_text,
+            collection="equipment",
+            top_k=3
+        )
+        
         plan_str = json.dumps(original_plan, ensure_ascii=False, indent=2)
         result_str = json.dumps(work_result, ensure_ascii=False, indent=2)
-        user_content = f"请根据原计划和执行结果重写 JSON 计划\n\n原计划:\n{plan_str}\n\n执行结果:\n{result_str}"
+        
+        equipment_text = ""
+        if rag_equipment:
+            equipment_text = "\n\n相关装备信息（含射程）:\n" + "\n".join([ctx.get("text", "") for ctx in rag_equipment])
+        
+        user_content = f"请根据原计划和执行结果重写 JSON 计划\n\n原计划:\n{plan_str}\n\n执行结果:\n{result_str}{equipment_text}"
         
         messages = [
             {"role": "system", "content": prompt},
@@ -71,8 +84,21 @@ class ReplanModule:
                 logger.warning(f"提示词格式化失败，使用替换方式: {e}")
                 prompt = prompt_template.replace("{tools_info}", tools_info_str)
             
+            # 检索装备信息（含射程），用于重新规划时考虑射程因素
+            plan_text = json.dumps(original_plan, ensure_ascii=False)
+            rag_equipment = self.context_manager.load_dynamic_context(
+                plan_text,
+                collection="equipment",
+                top_k=3
+            )
+            
             plan_str = json.dumps(original_plan, ensure_ascii=False, indent=2)
-            user_content = f"请根据原计划和用户反馈重写 JSON 计划\n\n原计划:\n{plan_str}\n\n用户反馈:\n{feedback}"
+            
+            equipment_text = ""
+            if rag_equipment:
+                equipment_text = "\n\n相关装备信息（含射程）:\n" + "\n".join([ctx.get("text", "") for ctx in rag_equipment])
+            
+            user_content = f"请根据原计划和用户反馈重写 JSON 计划\n\n原计划:\n{plan_str}\n\n用户反馈:\n{feedback}{equipment_text}"
             
             messages = [
                 {"role": "system", "content": prompt},
@@ -105,7 +131,7 @@ class ReplanModule:
         }
         
         try:
-            response = requests.post(LLM_CONFIG["api_endpoint"], json=payload, timeout=60)
+            response = requests.post(LLM_CONFIG["api_endpoint"], json=payload, timeout=LLM_CONFIG.get("timeout", 120))
             response.raise_for_status()
             result = response.json()
             

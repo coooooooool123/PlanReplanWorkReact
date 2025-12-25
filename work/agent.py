@@ -73,7 +73,14 @@ class WorkAgent:
             collection="executions"
         )
         
-        thought = self._think(step, rag_context)
+        # 检索装备信息（含射程），用于考虑射程因素
+        rag_equipment = self.context_manager.load_dynamic_context(
+            step_description,
+            collection="equipment",
+            top_k=3
+        )
+        
+        thought = self._think(step, rag_context, rag_equipment)
         action = self._extract_action(thought)
         
         # 如果extract_action返回None（关键词fallback），说明无法确定参数，返回错误
@@ -94,7 +101,7 @@ class WorkAgent:
                 "error": "无法确定执行动作"
             }
     
-    def _think(self, step: Dict, rag_context: List[Dict]) -> str:
+    def _think(self, step: Dict, rag_context: List[Dict], rag_equipment: List[Dict] = None) -> str:
         prompt = self.context_manager.load_static_context("work_prompt")
         
         # 添加工具schema信息
@@ -109,6 +116,11 @@ class WorkAgent:
         rag_text = ""
         if rag_context:
             rag_text = "\n相关执行历史:\n" + "\n".join([ctx.get("text", "") for ctx in rag_context[:3]])
+        
+        # 添加装备信息（含射程），用于考虑射程与缓冲区距离的关系
+        if rag_equipment:
+            equipment_text = "\n相关装备信息（含射程）:\n" + "\n".join([ctx.get("text", "") for ctx in rag_equipment])
+            rag_text += equipment_text
         
         previous_result = step.get("last_result_path", "")
         if previous_result:
@@ -198,7 +210,7 @@ class WorkAgent:
             "messages": messages
         }
         
-        response = requests.post(LLM_CONFIG["api_endpoint"], json=payload)
+        response = requests.post(LLM_CONFIG["api_endpoint"], json=payload, timeout=LLM_CONFIG.get("timeout", 120))
         response.raise_for_status()
         result = response.json()
         return result["choices"][0]["message"]["content"]

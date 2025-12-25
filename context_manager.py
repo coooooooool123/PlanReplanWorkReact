@@ -26,7 +26,8 @@ class ContextManager:
     def _ensure_collections(self):
         for collection_name in [CHROMA_CONFIG["collection_tasks"], 
                                 CHROMA_CONFIG["collection_executions"],
-                                CHROMA_CONFIG["collection_knowledge"]]:
+                                CHROMA_CONFIG["collection_knowledge"],
+                                CHROMA_CONFIG["collection_equipment"]]:
             try:
                 self.chroma_client.get_collection(collection_name)
             except:
@@ -285,6 +286,75 @@ class ContextManager:
                 }
             ]
     
+    def _get_equipment_info(self) -> List[Dict]:
+        """获取装备信息列表（包含射程等信息）
+        
+        注意：如果要修改装备信息，请修改此方法，然后运行 update_equipment_base() 更新数据库
+        装备信息应该包含：单位名称、装备类型、射程范围等
+        """
+        return [
+                {
+                    "text": "轻步兵主要装备突击步枪，有效射程300-400米，最大射程800米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "轻步兵", "type": "equipment_info", "range": "300-400", "max_range": "800"}
+                },
+                {
+                    "text": "重装步兵主要装备重型机枪，有效射程400-500米，最大射程1000米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "重装步兵", "type": "equipment_info", "range": "400-500", "max_range": "1000"}
+                },
+                {
+                    "text": "机械化步兵主要装备轻型坦克，有效射程500-600米，最大射程1200米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "机械化步兵", "type": "equipment_info", "range": "500-600", "max_range": "1200"}
+                },
+                {
+                    "text": "坦克部队主要装备重型坦克，有效射程600-700米，最大射程1500米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "坦克部队", "type": "equipment_info", "range": "600-700", "max_range": "1500"}
+                },
+                {
+                    "text": "反坦克步兵主要装备反坦克导弹，有效射程700-800米，最大射程1800米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "反坦克步兵", "type": "equipment_info", "range": "700-800", "max_range": "1800"}
+                },
+                {
+                    "text": "自行火炮主要装备自行火炮，有效射程800-900米，最大射程2000米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "自行火炮", "type": "equipment_info", "range": "800-900", "max_range": "2000"}
+                },
+                {
+                    "text": "牵引火炮主要装备牵引火炮，有效射程900-1000米，最大射程2200米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "牵引火炮", "type": "equipment_info", "range": "900-1000", "max_range": "2200"}
+                },
+                {
+                    "text": "防空部队主要装备防空导弹，有效射程1000-1100米，最大射程2400米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "防空部队", "type": "equipment_info", "range": "1000-1100", "max_range": "2400"}
+                },
+                {
+                    "text": "狙击手主要装备狙击步枪，有效射程1100-1200米，最大射程2600米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "狙击手", "type": "equipment_info", "range": "1100-1200", "max_range": "2600"}
+                },
+                {
+                    "text": "特种部队主要装备特种武器，有效射程1200-1300米，最大射程2800米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "特种部队", "type": "equipment_info", "range": "1200-1300", "max_range": "2800"}
+                },
+                {
+                    "text": "装甲侦察单位主要装备装甲侦察车，有效射程1300-1400米，最大射程3000米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "装甲侦察单位", "type": "equipment_info", "range": "1300-1400", "max_range": "3000"}
+                },
+                {
+                    "text": "工兵部队主要装备工兵装备，有效射程1400-1500米，最大射程3200米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "工兵部队", "type": "equipment_info", "range": "1400-1500", "max_range": "3200"}
+                },
+                {
+                    "text": "后勤保障部队主要装备后勤保障装备，有效射程1500-1600米，最大射程3400米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "后勤保障部队", "type": "equipment_info", "range": "1500-1600", "max_range": "3400"}
+                },
+                {
+                    "text": "指挥单位主要装备指挥装备，有效射程1600-1700米，最大射程3600米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "指挥单位", "type": "equipment_info", "range": "1600-1700", "max_range": "3600"}
+                },
+                {
+                    "text": "无人机侦察控制单元主要装备无人机侦察控制装备，有效射程1700-1800米，最大射程3800米。在规划缓冲区距离时，应考虑射程因素以确保火力覆盖范围。",
+                    "metadata": {"unit": "无人机侦察控制单元", "type": "equipment_info", "range": "1700-1800", "max_range": "3800"}
+                }
+            ]
+    
     def update_knowledge_base(self):
         """更新knowledge集合，清除旧数据并重新初始化军事单位部署规则"""
         try:
@@ -311,9 +381,36 @@ class ContextManager:
             traceback.print_exc()
             raise Exception(f"更新知识库失败: {str(e)}")
     
+    def update_equipment_base(self):
+        """更新equipment集合，清除旧数据并重新初始化装备信息"""
+        try:
+            equipment_coll = self.chroma_client.get_collection(CHROMA_CONFIG["collection_equipment"])
+            existing_ids = equipment_coll.get()["ids"]
+            
+            if existing_ids:
+                equipment_coll.delete(ids=existing_ids)
+            
+            equipment_info = self._get_equipment_info()
+            
+            for i, equipment in enumerate(equipment_info):
+                embedding = self.embedding_model.encode(equipment["text"]).tolist()
+                equipment_coll.add(
+                    embeddings=[embedding],
+                    documents=[equipment["text"]],
+                    metadatas=[equipment["metadata"]],
+                    ids=[f"equipment_{i}"]
+                )
+            
+            return len(equipment_info)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise Exception(f"更新装备信息库失败: {str(e)}")
+    
     def _init_rag_data(self):
         knowledge_coll = self.chroma_client.get_collection(CHROMA_CONFIG["collection_knowledge"])
         executions_coll = self.chroma_client.get_collection(CHROMA_CONFIG["collection_executions"])
+        equipment_coll = self.chroma_client.get_collection(CHROMA_CONFIG["collection_equipment"])
         
         existing_knowledge = knowledge_coll.get()
         existing_knowledge_ids = existing_knowledge["ids"]
@@ -342,6 +439,35 @@ class ContextManager:
                     ids=[f"knowledge_{i}"]
                 )
             print(f"已初始化 {len(military_units)} 条军事单位部署规则到knowledge集合")
+        
+        # 初始化equipment集合
+        existing_equipment = equipment_coll.get()
+        existing_equipment_ids = existing_equipment["ids"]
+        
+        should_init_equipment = len(existing_equipment_ids) == 0
+        
+        if not should_init_equipment:
+            metadatas = existing_equipment.get("metadatas", [])
+            has_equipment = any(
+                meta.get("type") == "equipment_info" 
+                for meta in metadatas if meta
+            )
+            if not has_equipment:
+                should_init_equipment = True
+                equipment_coll.delete(ids=existing_equipment_ids)
+        
+        if should_init_equipment:
+            equipment_info = self._get_equipment_info()
+            
+            for i, equipment in enumerate(equipment_info):
+                embedding = self.embedding_model.encode(equipment["text"]).tolist()
+                equipment_coll.add(
+                    embeddings=[embedding],
+                    documents=[equipment["text"]],
+                    metadatas=[equipment["metadata"]],
+                    ids=[f"equipment_{i}"]
+                )
+            print(f"已初始化 {len(equipment_info)} 条装备信息到equipment集合")
         
         if len(executions_coll.get()["ids"]) == 0:
             sample_executions = [

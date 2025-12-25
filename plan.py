@@ -21,11 +21,21 @@ class PlanModule:
             top_k=3
         )
         
+        rag_equipment = self.context_manager.load_dynamic_context(
+            user_task,
+            collection="equipment",
+            top_k=3
+        )
+        
         prompt = self.context_manager.load_static_context("plan_prompt")
         
         knowledge_text = ""
         if rag_knowledge:
             knowledge_text = "\n相关部署规则:\n" + "\n".join([ctx.get("text", "") for ctx in rag_knowledge])
+        
+        equipment_text = ""
+        if rag_equipment:
+            equipment_text = "\n相关装备信息（含射程）:\n" + "\n".join([ctx.get("text", "") for ctx in rag_equipment])
         
         tasks_text = ""
         if rag_tasks:
@@ -33,7 +43,7 @@ class PlanModule:
         
         messages = [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": f"任务: {user_task}{knowledge_text}{tasks_text}"}
+            {"role": "user", "content": f"任务: {user_task}{knowledge_text}{equipment_text}{tasks_text}"}
         ]
         
         response = self._call_llm(messages)
@@ -53,7 +63,7 @@ class PlanModule:
             "messages": messages
         }
         
-        response = requests.post(LLM_CONFIG["api_endpoint"], json=payload)
+        response = requests.post(LLM_CONFIG["api_endpoint"], json=payload, timeout=LLM_CONFIG.get("timeout", 120))
         response.raise_for_status()
         result = response.json()
         return result["choices"][0]["message"]["content"]
