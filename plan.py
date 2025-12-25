@@ -3,6 +3,9 @@ from context_manager import ContextManager
 from config import LLM_CONFIG
 import requests
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def save_task_to_rag(context_manager: ContextManager, user_task: str, plan: Dict):
@@ -74,13 +77,6 @@ class PlanModule:
                     "text": ctx.get("text", ""),
                     "metadata": ctx.get("metadata", {})
                 })
-        
-        # 不再自动保存，由用户决定是否保存
-        # self.context_manager.add_to_rag(
-        #     user_task,
-        #     {"type": "task", "plan": json.dumps(plan)},
-        #     collection="tasks"
-        # )
         
         return plan
     

@@ -139,7 +139,9 @@ def main():
             plan = st.session_state.current_plan
             if plan:
                 with st.expander("查看计划详情", expanded=True):
-                    st.json(plan)
+                    # 使用st.code显示完整JSON，避免被截断
+                    plan_json_str = json.dumps(plan, ensure_ascii=False, indent=2)
+                    st.code(plan_json_str, language="json")
                 
                 st.markdown("### 计划摘要")
                 col1, col2 = st.columns(2)
@@ -385,7 +387,7 @@ def main():
                                                         "task": st.session_state.task_input,
                                                         "plan": st.session_state.current_plan
                                                     },
-                                                    timeout=30
+                                                    timeout=API_TIMEOUT
                                                 )
                                                 if save_response.status_code == 200:
                                                     st.success("✓ 已保存到任务历史")
@@ -703,7 +705,6 @@ def main():
                     metadata = {}
                     if metadata_input.strip():
                         try:
-                            import json
                             metadata = json.loads(metadata_input)
                         except json.JSONDecodeError:
                             st.error("元数据格式错误，请输入有效的JSON格式")

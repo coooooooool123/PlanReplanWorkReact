@@ -69,6 +69,17 @@ class WorkAgent:
                 "params": step.get("params", {})
             })
         
+        # Type到工具的映射（作为fallback机制）
+        type_to_tool = {
+            "buffer": "buffer_filter_tool",
+            "elevation": "elevation_filter_tool",
+            "slope": "slope_filter_tool",
+            "vegetation": "vegetation_filter_tool"
+        }
+        
+        # 如果步骤有明确的type，且LLM可能无法识别，先尝试直接映射
+        # 但优先让LLM通过_think来选择，以获得更好的参数推断
+        
         rag_context = self.context_manager.load_dynamic_context(
             step_description,
             collection="executions"
@@ -84,7 +95,17 @@ class WorkAgent:
         thought = self._think(step, rag_context, rag_equipment)
         action = self._extract_action(thought)
         
-        # 如果extract_action返回None（关键词fallback），说明无法确定参数，返回错误
+        # 如果extract_action返回None，且步骤有明确的type，使用type映射作为fallback
+        if action is None and step_type in type_to_tool:
+            # 根据type创建默认action
+            tool_name = type_to_tool[step_type]
+            action = {
+                "tool": tool_name,
+                "params": step.get("params", {})
+            }
+            # 对于需要input_geojson_path的工具，如果未提供且上一步有结果，会自动填充（在execute_plan中处理）
+        
+        # 如果仍然无法确定，返回错误
         if action is None:
             return {
                 "success": False,
@@ -127,9 +148,15 @@ class WorkAgent:
         if previous_result:
             rag_text += f"\n上一步的输出文件路径: {previous_result}"
         
+        # 在用户消息中明确提示type字段的含义
+        user_content = f"步骤: {json.dumps(step, ensure_ascii=False)}{rag_text}"
+        if step_type:
+            type_hint = f"\n\n注意：步骤类型(type)为'{step_type}'，对应工具映射：buffer->buffer_filter_tool, elevation->elevation_filter_tool, slope->slope_filter_tool, vegetation->vegetation_filter_tool"
+            user_content += type_hint
+        
         messages = [
             {"role": "system", "content": prompt_with_schema},
-            {"role": "user", "content": f"步骤: {json.dumps(step, ensure_ascii=False)}{rag_text}"}
+            {"role": "user", "content": user_content}
         ]
         
         response = self._call_llm(messages)

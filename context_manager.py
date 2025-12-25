@@ -168,6 +168,15 @@ class ContextManager:
         embedding = self.embedding_model.encode(text).tolist()
         
         existing = coll.get()
+        
+        # 如果是executions集合，检查是否超过30条，超过则删除第一条
+        if collection == CHROMA_CONFIG["collection_executions"]:
+            if existing['ids'] and len(existing['ids']) >= 30:
+                # 删除第一条记录（按ID排序，删除最小的ID）
+                sorted_ids = sorted(existing['ids'])
+                oldest_id = sorted_ids[0]
+                coll.delete(ids=[oldest_id])
+        
         new_id = f"{collection}_{len(existing['ids']) if existing['ids'] else 0}"
         
         coll.add(
