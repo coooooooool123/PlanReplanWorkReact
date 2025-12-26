@@ -110,11 +110,11 @@ async def generate_plan(request: PlanRequest):
         error_detail = traceback.format_exc()
         logger.error(f"生成计划错误: {str(e)}")
         logger.error(error_detail)
-        
+
         error_msg = str(e)
         if len(error_msg) > 500:
             error_msg = error_msg[:500] + "..."
-        
+
         raise HTTPException(status_code=500, detail=f"生成计划时出错: {error_msg}")
 
 @app.post("/api/replan", response_model=TaskResponse)
@@ -123,11 +123,11 @@ async def replan_with_feedback(request: ReplanRequest):
         import traceback
         import logging
         logger = logging.getLogger(__name__)
-        
+
         logger.info(f"收到重新规划请求，反馈: {request.feedback[:100]}")
-        
+
         result = orchestrator.replan_with_feedback(request.plan, request.feedback)
-        
+
         logger.info("重新规划成功")
         return TaskResponse(
             success=result.get("success", False),
@@ -138,15 +138,15 @@ async def replan_with_feedback(request: ReplanRequest):
         import traceback
         import logging
         logger = logging.getLogger(__name__)
-        
+
         error_detail = traceback.format_exc()
         logger.error(f"重新规划错误: {str(e)}")
         logger.error(error_detail)
-        
+
         error_msg = str(e)
         if len(error_msg) > 500:
             error_msg = error_msg[:500] + "..."
-        
+
         raise HTTPException(
             status_code=500,
             detail=f"重新规划时出错: {error_msg}"
@@ -166,11 +166,11 @@ async def execute_plan(request: ExecuteRequest):
         error_detail = traceback.format_exc()
         logger.error(f"执行计划错误: {str(e)}")
         logger.error(error_detail)
-        
+
         error_msg = str(e)
         if len(error_msg) > 500:
             error_msg = error_msg[:500] + "..."
-        
+
         raise HTTPException(status_code=500, detail=f"执行计划时出错: {error_msg}")
 
 @app.post("/api/task", response_model=TaskResponse)
@@ -232,7 +232,7 @@ async def get_knowledge(collection: str = "knowledge"):
     try:
         coll = context_manager.chroma_client.get_collection(collection)
         data = coll.get()
-        
+
         items = []
         for i, doc_id in enumerate(data.get("ids", [])):
             items.append({
@@ -240,7 +240,7 @@ async def get_knowledge(collection: str = "knowledge"):
                 "text": data["documents"][i] if i < len(data.get("documents", [])) else "",
                 "metadata": data["metadatas"][i] if i < len(data.get("metadatas", [])) else {}
             })
-        
+
         return {
             "success": True,
             "collection": collection,
@@ -257,21 +257,21 @@ async def add_knowledge(request: KnowledgeAddRequest):
     try:
         collection = request.collection
         coll = context_manager.chroma_client.get_collection(collection)
-        
+
         existing = coll.get()
         new_id = f"{collection}_{len(existing['ids']) if existing['ids'] else 0}"
-        
+
         embedding = context_manager.embedding_model.encode(request.text).tolist()
-        
+
         coll.add(
             embeddings=[embedding],
             documents=[request.text],
             metadatas=[request.metadata],
             ids=[new_id]
         )
-        
+
         logger.info(f"成功添加数据到{collection}集合，ID: {new_id}")
-        
+
         return {
             "success": True,
             "message": f"数据已添加到{collection}集合",
@@ -286,15 +286,15 @@ async def delete_knowledge(item_id: str, collection: str = "knowledge"):
     """删除指定集合中的特定记录"""
     try:
         coll = context_manager.chroma_client.get_collection(collection)
-        
+
         existing = coll.get()
         if item_id not in existing["ids"]:
             raise HTTPException(status_code=404, detail=f"记录 {item_id} 不存在")
-        
+
         coll.delete(ids=[item_id])
-        
+
         logger.info(f"成功从{collection}集合删除记录: {item_id}")
-        
+
         return {
             "success": True,
             "message": f"记录 {item_id} 已从{collection}集合删除"
@@ -312,7 +312,7 @@ async def save_task(request: SaveTaskRequest):
         from plan import save_task_to_rag
         save_task_to_rag(context_manager, request.task, request.plan)
         logger.info(f"成功保存任务到tasks集合: {request.task[:50]}...")
-        
+
         return {
             "success": True,
             "message": "任务已保存到tasks集合"
@@ -325,17 +325,16 @@ async def save_task(request: SaveTaskRequest):
 async def clear_collection(collection: str):
     """清空指定集合的所有记录"""
     try:
-        # 只允许清空executions和tasks集合
         allowed_collections = ["executions", "tasks"]
         if collection not in allowed_collections:
             raise HTTPException(
                 status_code=400, 
                 detail=f"不允许清空{collection}集合。只允许清空: {', '.join(allowed_collections)}"
             )
-        
+
         coll = context_manager.chroma_client.get_collection(collection)
         data = coll.get()
-        
+
         if data["ids"]:
             coll.delete(ids=data["ids"])
             count = len(data["ids"])
@@ -363,7 +362,7 @@ async def update_knowledge_base():
     try:
         count = context_manager.update_knowledge_base()
         logger.info(f"成功更新knowledge集合，共{count}条记录")
-        
+
         return {
             "success": True,
             "message": f"knowledge集合已更新",
@@ -384,10 +383,10 @@ async def get_results_list():
                 "results": [],
                 "count": 0
             }
-        
+
         result_files = list(result_dir.glob("*.geojson"))
         result_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-        
+
         results = []
         for file_path in result_files:
             stat = file_path.stat()
@@ -397,7 +396,7 @@ async def get_results_list():
                 "modified_time": stat.st_mtime,
                 "modified_time_str": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
             })
-        
+
         return {
             "success": True,
             "results": results,
@@ -413,17 +412,16 @@ async def get_result_file(filename: str):
     try:
         result_dir = PATHS["result_dir"]
         file_path = result_dir / filename
-        
-        # 安全检查：确保文件在result目录内
+
         if not file_path.resolve().is_relative_to(result_dir.resolve()):
             raise HTTPException(status_code=403, detail="访问被拒绝")
-        
+
         if not file_path.exists():
             raise HTTPException(status_code=404, detail=f"文件 {filename} 不存在")
-        
+
         if not filename.endswith('.geojson'):
             raise HTTPException(status_code=400, detail="只支持GeoJSON文件")
-        
+
         return FileResponse(
             path=str(file_path),
             media_type="application/geo+json",

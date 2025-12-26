@@ -15,7 +15,6 @@ BASE_DIR = Path(__file__).parent.parent.parent
 WORLDCOVER_PATH = BASE_DIR / "data" / "WorldCover_10m_2020_v100_N30E117.tif"
 RESULT_DIR = BASE_DIR / "result"
 
-# ESA WorldCover 2020 分类标准
 WORLDCOVER_CLASSES = {
     10: "树",
     20: "灌木",
@@ -29,7 +28,6 @@ WORLDCOVER_CLASSES = {
     95: "苔原",
     100: "永久性水体"
 }
-
 
 class VegetationFilterTool(BaseTool):
     def __init__(self):
@@ -48,20 +46,19 @@ class VegetationFilterTool(BaseTool):
                 "description": "要排除的植被类型编码列表（可选），与vegetation_types互斥"
             }
         }
-    
+
     def _get_vegetation_from_worldcover(self, geometry: Polygon, 
                                        vegetation_types: Optional[List[int]] = None,
                                        exclude_types: Optional[List[int]] = None) -> Tuple[bool, Optional[int], Optional[str]]:
         """
         从WorldCover数据中获取区域的植被类型
-        
+
         返回: (is_valid, vegetation_code, vegetation_name)
         """
         try:
             if not WORLDCOVER_PATH.exists():
-                # 如果文件不存在，返回True（不过滤）
                 return True, None, None
-            
+
             with rasterio.open(str(WORLDCOVER_PATH)) as src:
                 geometry_transformed = geometry
                 if src.crs is not None:
@@ -73,15 +70,14 @@ class VegetationFilterTool(BaseTool):
                             geometry_transformed = Polygon(transformed_coords)
                     except Exception:
                         geometry_transformed = geometry
-                
+
                 try:
                     out_image, out_transform = mask(src, [geometry_transformed], crop=True, filled=False)
                     veg_data = out_image[0].astype("float64")
                 except Exception:
-                    # 如果mask失败，使用采样方式
                     bounds = geometry.bounds
                     center = geometry.centroid
-                    
+
                     sample_points_ll = [
                         (center.x, center.y),
                         (bounds[0], bounds[1]),
@@ -89,7 +85,7 @@ class VegetationFilterTool(BaseTool):
                         (bounds[0], bounds[3]),
                         (bounds[2], bounds[3]),
                     ]
-                    
+
                     sample_points = sample_points_ll
                     if src.crs is not None and src.crs.to_epsg() != 4326:
                         try:
@@ -97,7 +93,7 @@ class VegetationFilterTool(BaseTool):
                             sample_points = [transformer.transform(x, y) for x, y in sample_points_ll]
                         except Exception:
                             sample_points = sample_points_ll
-                    
+
                     vegetation_codes = []
                     for x, y in sample_points:
                         try:
@@ -109,73 +105,62 @@ class VegetationFilterTool(BaseTool):
                                     vegetation_codes.append(v)
                         except Exception:
                             continue
-                    
+
                     if not vegetation_codes:
                         return True, None, None
-                    
-                    # 使用最常见的植被类型
+
                     unique, counts = np.unique(vegetation_codes, return_counts=True)
                     dominant_code = int(unique[np.argmax(counts)])
                     dominant_name = WORLDCOVER_CLASSES.get(dominant_code, f"未知({dominant_code})")
-                    
-                    # 检查是否符合筛选条件
+
                     if vegetation_types is not None:
                         if dominant_code not in vegetation_types:
                             return False, dominant_code, dominant_name
                     if exclude_types is not None:
                         if dominant_code in exclude_types:
                             return False, dominant_code, dominant_name
-                    
+
                     return True, dominant_code, dominant_name
-                
+
                 if np.ma.isMaskedArray(veg_data):
                     veg_data = veg_data.filled(np.nan)
-                
+
                 if src.nodata is not None:
                     veg_data[veg_data == float(src.nodata)] = np.nan
-                
+
                 if veg_data.size == 0 or np.all(np.isnan(veg_data)):
                     return True, None, None
-                
-                # 获取有效像素值
+
                 valid_pixels = veg_data[np.isfinite(veg_data)]
                 if len(valid_pixels) == 0:
                     return True, None, None
-                
-                # 使用最常见的植被类型
+
                 unique, counts = np.unique(valid_pixels.astype(int), return_counts=True)
                 dominant_code = int(unique[np.argmax(counts)])
                 dominant_name = WORLDCOVER_CLASSES.get(dominant_code, f"未知({dominant_code})")
-                
-                # 检查是否符合筛选条件
+
                 if vegetation_types is not None:
-                    # 检查区域内是否有足够的指定类型像素
                     type_pixels = np.sum(np.isin(valid_pixels.astype(int), vegetation_types))
                     type_ratio = type_pixels / len(valid_pixels) if len(valid_pixels) > 0 else 0
-                    # 如果指定类型占比小于50%，则认为不符合
                     if type_ratio < 0.5:
                         return False, dominant_code, dominant_name
-                
+
                 if exclude_types is not None:
-                    # 检查区域内是否有要排除的类型
                     exclude_pixels = np.sum(np.isin(valid_pixels.astype(int), exclude_types))
                     exclude_ratio = exclude_pixels / len(valid_pixels) if len(valid_pixels) > 0 else 0
-                    # 如果要排除的类型占比大于50%，则不符合
                     if exclude_ratio > 0.5:
                         return False, dominant_code, dominant_name
-                
+
                 return True, dominant_code, dominant_name
-                
+
         except Exception as e:
-            # 出错时返回True（不过滤），避免因数据问题导致筛选失败
             return True, None, None
-    
+
     def execute(self, **kwargs) -> Dict[str, Any]:
         input_path = kwargs.get("input_geojson_path")
         vegetation_types = kwargs.get("vegetation_types")
         exclude_types = kwargs.get("exclude_types")
-        
-        # 处理vegetation_types参数：支持单个值或列表
+
         if vegetation_types is not None:
             if isinstance(vegetation_types, (int, float)):
                 vegetation_types = [int(vegetation_types)]
@@ -183,8 +168,7 @@ class VegetationFilterTool(BaseTool):
                 vegetation_types = [int(v) for v in vegetation_types if v is not None]
             else:
                 vegetation_types = None
-        
-        # 处理exclude_types参数：支持单个值或列表
+
         if exclude_types is not None:
             if isinstance(exclude_types, (int, float)):
                 exclude_types = [int(exclude_types)]
@@ -192,11 +176,10 @@ class VegetationFilterTool(BaseTool):
                 exclude_types = [int(v) for v in exclude_types if v is not None]
             else:
                 exclude_types = None
-        
+
         os.makedirs(RESULT_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # 生成输出文件名
+
         if vegetation_types:
             veg_str = "_".join([str(v) for v in sorted(vegetation_types)])
             output_path = RESULT_DIR / f"vegetation_filter_{veg_str}_{timestamp}.geojson"
@@ -205,15 +188,15 @@ class VegetationFilterTool(BaseTool):
             output_path = RESULT_DIR / f"vegetation_filter_{exclude_str}_{timestamp}.geojson"
         else:
             output_path = RESULT_DIR / f"vegetation_filter_all_{timestamp}.geojson"
-        
+
         if not input_path:
             return {
                 "success": False,
                 "error": "缺少必需参数 input_geojson_path"
             }
-        
+
         gdf = gpd.read_file(input_path)
-        
+
         if gdf.empty:
             return {
                 "success": True,
@@ -221,8 +204,7 @@ class VegetationFilterTool(BaseTool):
                 "region_count": 0,
                 "total_area_m2": 0.0
             }
-        
-        # 如果没有指定筛选条件，直接返回原数据
+
         if vegetation_types is None and exclude_types is None:
             gdf.to_file(output_path, driver='GeoJSON')
             return {
@@ -231,11 +213,11 @@ class VegetationFilterTool(BaseTool):
                 "region_count": len(gdf),
                 "total_area_m2": float(gdf['area_m2'].sum()) if not gdf.empty and 'area_m2' in gdf.columns else 0.0
             }
-        
+
         valid_indices = []
         vegetation_codes = []
         vegetation_names = []
-        
+
         for idx, row in gdf.iterrows():
             is_valid, veg_code, veg_name = self._get_vegetation_from_worldcover(
                 row.geometry, 
@@ -249,24 +231,23 @@ class VegetationFilterTool(BaseTool):
             else:
                 vegetation_codes.append(veg_code)
                 vegetation_names.append(veg_name)
-        
+
         filtered_gdf = gdf.loc[valid_indices].copy()
-        
+
         if vegetation_codes:
             veg_code_series = pd.Series(vegetation_codes, index=gdf.index)
             veg_name_series = pd.Series(vegetation_names, index=gdf.index)
             filtered_gdf['vegetation_code'] = veg_code_series.loc[valid_indices].values
             filtered_gdf['vegetation_type'] = veg_name_series.loc[valid_indices].values
-        
+
         filtered_gdf.to_file(output_path, driver='GeoJSON')
-        
+
         return {
             "success": True,
             "result_path": str(output_path),
             "region_count": len(filtered_gdf),
             "total_area_m2": float(filtered_gdf['area_m2'].sum()) if not filtered_gdf.empty and 'area_m2' in filtered_gdf.columns else 0.0
         }
-    
+
     def validate_params(self, **kwargs) -> bool:
         return kwargs.get("input_geojson_path") is not None
-
