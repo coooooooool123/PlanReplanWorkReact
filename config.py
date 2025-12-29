@@ -38,9 +38,12 @@ RAG_CONFIG = {
     "oversample": 2,
     "min_k": 2,
     "max_distance": 0.35,
+    "relaxed_distance_increment": 0.3,
     "w_sem": 0.75,
     "w_kw": 0.25,
-    "metadata_boost_unit": 0.15,
+    "metadata_boost_unit": 0.25,
     "metadata_boost_type": 0.10,
+    "enable_tasks_collection": False,
+    "enable_executions_collection": False,
     "similarity_threshold": 0.7
 }

@@ -1,7 +1,7 @@
 from typing import Dict, List, Any, Optional
 from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool
 from context_manager import ContextManager
-from config import LLM_CONFIG
+from config import LLM_CONFIG, RAG_CONFIG
 import requests
 import json
 
@@ -172,10 +172,12 @@ class WorkAgent:
                 "params": step_params
             })
 
-        rag_context = self.context_manager.load_dynamic_context(
-            step_description,
-            collection="executions"
-        )
+        rag_context = []
+        if RAG_CONFIG.get("enable_executions_collection", True):
+            rag_context = self.context_manager.load_dynamic_context(
+                step_description,
+                collection="executions"
+            )
 
         rag_equipment = self.context_manager.load_dynamic_context(
             step_description,

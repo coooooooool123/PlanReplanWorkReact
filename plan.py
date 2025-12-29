@@ -1,6 +1,6 @@
 from typing import Dict
 from context_manager import ContextManager
-from config import LLM_CONFIG
+from config import LLM_CONFIG, RAG_CONFIG
 from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool
 import requests
 import json
@@ -27,10 +27,12 @@ class PlanModule:
         }
 
     def generate_plan(self, user_task: str) -> Dict:
-        rag_tasks = self.context_manager.load_dynamic_context(
-            user_task,
-            collection="tasks"
-        )
+        rag_tasks = []
+        if RAG_CONFIG.get("enable_tasks_collection", True):
+            rag_tasks = self.context_manager.load_dynamic_context(
+                user_task,
+                collection="tasks"
+            )
 
         rag_knowledge = self.context_manager.load_dynamic_context(
             user_task,

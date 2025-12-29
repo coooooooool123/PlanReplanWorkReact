@@ -34,18 +34,19 @@ class ContextManager:
         """根据查询内容路由到相应的collection(s)，支持多库并查"""
         query_lower = query.lower()
         collections = []
-
+        
         equipment_keywords = ["射程", "最大射程", "range", "max_range", "有效射程"]
         if any(kw in query for kw in equipment_keywords):
             collections.append(CHROMA_CONFIG["collection_equipment"])
-
-        execution_keywords = [
-            "用什么工具", "怎么筛选", "buffer_filter_tool", "elevation_filter_tool",
-            "vegetation_filter_tool", "slope_filter_tool", "链式", "工具链"
-        ]
-        if any(kw in query for kw in execution_keywords):
-            collections.append(CHROMA_CONFIG["collection_executions"])
-
+        
+        if RAG_CONFIG.get("enable_executions_collection", True):
+            execution_keywords = [
+                "用什么工具", "怎么筛选", "buffer_filter_tool", "elevation_filter_tool",
+                "vegetation_filter_tool", "slope_filter_tool", "链式", "工具链"
+            ]
+            if any(kw in query for kw in execution_keywords):
+                collections.append(CHROMA_CONFIG["collection_executions"])
+        
         knowledge_keywords = [
             "部署", "配置", "坡度", "高程", "缓冲距离", "地表", "隐蔽", "机动"
         ]
@@ -55,13 +56,13 @@ class ContextManager:
             "装甲侦察单位", "工兵部队", "后勤保障部队", "指挥单位", "无人机侦察控制单元"
         ]
         has_unit = any(unit in query for unit in unit_names)
-
+        
         if any(kw in query for kw in knowledge_keywords) or has_unit:
             collections.append(CHROMA_CONFIG["collection_knowledge"])
-
+        
         if not collections:
             collections.append(CHROMA_CONFIG["collection_knowledge"])
-
+        
         return list(set(collections))
 
     def _init_chroma(self):
@@ -323,7 +324,8 @@ class ContextManager:
 
         min_k = RAG_CONFIG["min_k"]
         if len(scored_candidates) < min_k and len(all_candidates) > len(scored_candidates):
-            relaxed_max_distance = max_distance + 0.5
+            relaxed_distance_increment = RAG_CONFIG.get("relaxed_distance_increment", 0.5)
+            relaxed_max_distance = max_distance + relaxed_distance_increment
             logger.warning(f"[RAG降级] 结果不足{min_k}条，放宽阈值至{relaxed_max_distance}")
 
             for candidate in all_candidates:
