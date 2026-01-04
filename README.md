@@ -10,7 +10,7 @@
 - 支持多步骤复杂任务的自动分解和排序
 - **多任务拆分**：自动识别多个单位任务（如"无人机和步兵分别应该部署在哪"），为每个单位生成独立的部署计划
 
-### 2. **RAG增强的智能决策（混合检索系统）**
+### 2. **KAG知识增强的智能决策（混合检索系统）**
 - **智能路由**：根据查询内容自动路由到合适的collection（knowledge/equipment/executions）
 - **混合检索**：向量语义检索 + 关键词匹配，提升专有名词和参数值的匹配准确度
 - **距离阈值过滤**：使用cosine距离阈值（max_distance=0.35，相当于相似度≥0.65）确保检索质量
@@ -66,7 +66,7 @@
 │       ┌────────────▼────────────┐                      │
 │       │  ContextManager (上下文管理)                    │
 │       │  - 静态上下文(提示词)                           │
-│       │  - 动态上下文(RAG检索)                          │
+│       │  - 动态上下文(KAG知识图谱)                      │
 │       └────────────┬────────────┘                      │
 └────────────────────┼────────────────────────────────────┘
                      │
@@ -80,7 +80,7 @@
                      │
 ┌────────────────────▼────────────────────────────────────┐
 │              数据与知识层                                │
-│  - OSM地理数据  - DEM高程数据  - WorldCover植被数据  - ChromaDB向量数据库 │
+│  - OSM地理数据  - DEM高程数据  - WorldCover植被数据  - OpenSPG KAG知识图谱 │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -91,7 +91,7 @@
     │
     ▼
 ┌─────────────┐
-│  Plan阶段   │ ◄── RAG检索: knowledge + tasks + equipment
+│  Plan阶段   │ ◄── KAG检索: knowledge + tasks + equipment
 │  (规划)     │     动态获取工具schema
 │             │     生成包含具体参数的计划（type + params）
 └──────┬──────┘
@@ -168,18 +168,20 @@
 #### 5. **ContextManager（上下文管理器）**
 智能体的"记忆"系统：
 - **静态上下文**：管理提示词模板（plan_prompt, replan_prompt, work_prompt, system_prompt）
-- **动态上下文**：ChromaDB向量数据库，支持混合检索（向量+关键词）
+- **动态上下文**：OpenSPG KAG知识图谱，支持知识增强生成
   - `tasks`集合：历史任务和计划（可通过配置启用/禁用）
   - `executions`集合：执行记录和结果（最多保留30条，按时间自动清理，可通过配置启用/禁用）
   - `knowledge`集合：领域知识（15种军事单位部署规则）
   - `equipment`集合：装备信息（含射程等）
-- **RAG检索优化**：
+- **KAG知识图谱检索**：
   - **Embedding模型**：BAAI/bge-large-zh-v1.5（中文优化）
+  - **问答模型**：qwen3:32b（本地部署）
   - **距离度量**：统一使用cosine距离，确保阈值可解释
   - **BGE前缀优化**：query添加"query: "前缀，passage添加"passage: "前缀
-  - **智能路由**：根据关键词自动选择collection（如"射程"→equipment，"部署"→knowledge）
+  - **智能路由**：根据关键词自动选择实体类型（如"射程"→Equipment，"部署"→MilitaryUnit）
   - **混合打分**：语义相似度(75%) + 关键词匹配(25%) + 元数据加分
   - **质量过滤**：距离阈值过滤 + 动态top_k调整
+  - **LLM推理**：可选使用LLM进行逻辑推理和重排序
   - **详细日志**：记录路由、召回、过滤、打分全过程，便于调参
 - **上下文压缩**：自动处理过长上下文
 
@@ -530,13 +532,14 @@ LLM_CONFIG = {
 - DEM文件: `AIgen/data/dem.tif`
 - 结果目录: `AIgen/result/`
 
-### ChromaDB配置
+### KAG知识图谱配置
 
-- 数据库路径: `AIgen/context/dynamic/chroma_db/`
-- 集合: `tasks`, `executions`, `knowledge`, `equipment`
+- 知识图谱存储路径: `AIgen/context/dynamic/kag_storage/`
+- 实体类型: `MilitaryUnit`, `Equipment`, `Task`, `Execution`
 - **嵌入模型**: `BAAI/bge-large-zh-v1.5`（中文优化的大模型）
+- **问答模型**: `qwen3:32b`（本地部署，通过LLM_CONFIG配置）
 - **距离度量**: cosine（统一配置，确保阈值可解释）
-- **RAG配置**:
+- **KAG配置**:
   - `top_k=2`: 最终返回的top_k结果数
   - `oversample=2`: 向量召回时先召回 `top_k * oversample` 条候选
   - `min_k=2`: 过滤后最少保留的结果数，不足时触发降级策略
@@ -568,7 +571,9 @@ LLM_CONFIG = {
 - 与居民区的缓冲距离
 - 部署策略说明
 
-### 更新知识库
+### KAG知识图谱管理
+
+#### 更新知识库
 
 **方法1**: 前端界面
 - "数据库管理"标签页 → 选择knowledge集合 → 点击"批量更新"
@@ -587,10 +592,64 @@ python update_knowledge.py
 python update_equipment.py
 ```
 
+**查看KAG知识图谱内容**：
+```bash
+# 查看所有信息（实体、关系、摘要）
+python view_kag.py
+
+# 只查看实体
+python view_kag.py --entities
+
+# 只查看关系
+python view_kag.py --relations
+
+# 只查看摘要
+python view_kag.py --summary
+```
+
+**如何更新KAG知识**：
+
+1. **通过脚本更新（推荐）**：
+   - 修改 `context_manager.py` 中的 `_get_military_units_rules()` 方法，然后运行 `python update_knowledge.py`
+   - 修改 `context_manager.py` 中的 `_get_equipment_info()` 方法，然后运行 `python update_equipment.py`
+
+2. **通过API接口添加**：
+   ```bash
+   curl -X POST "http://localhost:8000/api/knowledge" \
+     -H "Content-Type: application/json" \
+     -d '{"collection": "knowledge", "text": "新的部署规则", "metadata": {"unit": "新单位", "type": "deployment_rule"}}'
+   ```
+
+3. **直接编辑kg.json文件（不推荐）**：
+   - 直接编辑 `context/dynamic/kag_storage/kg.json` 文件
+   - 注意：需要重新生成embedding向量，建议使用方法1或2
+
+**如何查看KAG内容**：
+
+1. **使用查看脚本（推荐）**：
+   ```bash
+   python view_kag.py              # 查看所有信息
+   python view_kag.py --entities   # 只查看实体
+   python view_kag.py --relations  # 只查看关系
+   python view_kag.py --summary    # 只查看摘要
+   ```
+
+2. **通过API接口查看**：
+   ```bash
+   curl "http://localhost:8000/api/knowledge?collection=knowledge"
+   curl "http://localhost:8000/api/collections"
+   ```
+
+3. **直接查看JSON文件**：
+   - 打开 `context/dynamic/kag_storage/kg.json` 文件
+   - 包含所有实体、关系和embedding向量
+
 **注意**：
-- 更新知识库后，所有文档会使用新的embedding模型重新编码
-- 文档入库时自动添加"passage: "前缀（BGE优化）
-- ID生成策略：`{collection}_{timestamp_ms}_{uuid8}`，避免并发冲突
+- 更新知识库后，所有实体会使用新的embedding模型重新编码
+- 实体入库时自动添加"passage: "前缀（BGE优化）
+- 知识图谱数据存储在 `context/dynamic/kag_storage/kg.json`
+- **迁移完成后**：可以删除 `context/dynamic/chroma_db` 目录（数据已迁移到KAG）
+- **迁移脚本**：`migrate_to_kag.py` 运行完成后可以删除，后续使用 `update_knowledge.py` 和 `update_equipment.py` 更新
 
 ## 🔧 开发指南
 

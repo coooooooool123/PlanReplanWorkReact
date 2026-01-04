@@ -21,14 +21,16 @@ if str(BASE_DIR) not in sys.path:
 try:
     from orchestrator import Orchestrator
     from context_manager import ContextManager
-    from config import CHROMA_CONFIG, PATHS
+    from config import PATHS
+    from context.kag.schema import COLLECTION_TO_ENTITY_TYPE
 except ImportError:
     BASE_DIR_PARENT = BASE_DIR.parent
     if str(BASE_DIR_PARENT) not in sys.path:
         sys.path.insert(0, str(BASE_DIR_PARENT))
     from orchestrator import Orchestrator
     from context_manager import ContextManager
-    from config import CHROMA_CONFIG, PATHS
+    from config import PATHS
+    from context.kag.schema import COLLECTION_TO_ENTITY_TYPE
 
 app = FastAPI(
     title="空地智能体API服务",
@@ -70,10 +72,6 @@ class KnowledgeAddRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="元数据")
     collection: str = Field(default="knowledge", description="集合名称")
 
-class SaveTaskRequest(BaseModel):
-    task: str = Field(..., description="任务描述")
-    plan: Dict[str, Any] = Field(..., description="计划内容")
-
 @app.get("/")
 async def root():
     return {
@@ -91,7 +89,6 @@ async def root():
             "/api/knowledge/update": "PUT - 批量更新knowledge集合",
             "/api/results": "GET - 获取所有结果文件列表",
             "/api/results/{filename}": "GET - 获取特定结果文件内容",
-            "/api/task/save": "POST - 保存任务到tasks集合",
             "/docs": "GET - API文档"
         }
     }
@@ -205,15 +202,13 @@ async def get_collections():
     """获取所有集合的基本信息"""
     try:
         collections_info = {}
-        for collection_name in [CHROMA_CONFIG["collection_tasks"], 
-                                CHROMA_CONFIG["collection_executions"],
-                                CHROMA_CONFIG["collection_knowledge"]]:
+        for collection_name in ["knowledge", "equipment"]:
             try:
-                coll = context_manager.chroma_client.get_collection(collection_name)
-                data = coll.get()
+                entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection_name, "MilitaryUnit")
+                entities = context_manager.kag.get_entities_by_type(entity_type)
                 collections_info[collection_name] = {
                     "name": collection_name,
-                    "count": len(data["ids"]) if data["ids"] else 0
+                    "count": len(entities)
                 }
             except Exception as e:
                 collections_info[collection_name] = {
@@ -230,15 +225,15 @@ async def get_collections():
 async def get_knowledge(collection: str = "knowledge"):
     """获取指定集合的所有数据"""
     try:
-        coll = context_manager.chroma_client.get_collection(collection)
-        data = coll.get()
+        entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection, "MilitaryUnit")
+        entities = context_manager.kag.get_entities_by_type(entity_type)
 
         items = []
-        for i, doc_id in enumerate(data.get("ids", [])):
+        for entity in entities:
             items.append({
-                "id": doc_id,
-                "text": data["documents"][i] if i < len(data.get("documents", [])) else "",
-                "metadata": data["metadatas"][i] if i < len(data.get("metadatas", [])) else {}
+                "id": entity["id"],
+                "text": entity.get("text", ""),
+                "metadata": entity.get("properties", {})
             })
 
         return {
@@ -256,18 +251,22 @@ async def add_knowledge(request: KnowledgeAddRequest):
     """添加数据到指定集合"""
     try:
         collection = request.collection
-        coll = context_manager.chroma_client.get_collection(collection)
+        entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection, "MilitaryUnit")
+        
+        import time
+        from uuid import uuid4
+        timestamp_ms = int(time.time() * 1000)
+        unique_suffix = uuid4().hex[:8]
+        new_id = f"{collection}_{timestamp_ms}_{unique_suffix}"
 
-        existing = coll.get()
-        new_id = f"{collection}_{len(existing['ids']) if existing['ids'] else 0}"
+        properties = request.metadata.copy()
+        properties["text"] = request.text
 
-        embedding = context_manager.embedding_model.encode(request.text).tolist()
-
-        coll.add(
-            embeddings=[embedding],
-            documents=[request.text],
-            metadatas=[request.metadata],
-            ids=[new_id]
+        context_manager.kag.add_entity(
+            entity_type=entity_type,
+            entity_id=new_id,
+            properties=properties,
+            text=request.text
         )
 
         logger.info(f"成功添加数据到{collection}集合，ID: {new_id}")
@@ -285,13 +284,11 @@ async def add_knowledge(request: KnowledgeAddRequest):
 async def delete_knowledge(item_id: str, collection: str = "knowledge"):
     """删除指定集合中的特定记录"""
     try:
-        coll = context_manager.chroma_client.get_collection(collection)
-
-        existing = coll.get()
-        if item_id not in existing["ids"]:
+        entity = context_manager.kag.get_entity(item_id)
+        if entity is None:
             raise HTTPException(status_code=404, detail=f"记录 {item_id} 不存在")
 
-        coll.delete(ids=[item_id])
+        context_manager.kag.delete_entity(item_id)
 
         logger.info(f"成功从{collection}集合删除记录: {item_id}")
 
@@ -305,39 +302,24 @@ async def delete_knowledge(item_id: str, collection: str = "knowledge"):
         logger.error(f"从{collection}集合删除记录失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"删除记录失败: {str(e)}")
 
-@app.post("/api/task/save")
-async def save_task(request: SaveTaskRequest):
-    """保存任务到tasks集合"""
-    try:
-        from plan import save_task_to_rag
-        save_task_to_rag(context_manager, request.task, request.plan)
-        logger.info(f"成功保存任务到tasks集合: {request.task[:50]}...")
-
-        return {
-            "success": True,
-            "message": "任务已保存到tasks集合"
-        }
-    except Exception as e:
-        logger.error(f"保存任务失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"保存任务失败: {str(e)}")
-
 @app.delete("/api/knowledge/clear/{collection}")
 async def clear_collection(collection: str):
     """清空指定集合的所有记录"""
     try:
-        allowed_collections = ["executions", "tasks"]
+        allowed_collections = ["knowledge", "equipment"]
         if collection not in allowed_collections:
             raise HTTPException(
                 status_code=400, 
                 detail=f"不允许清空{collection}集合。只允许清空: {', '.join(allowed_collections)}"
             )
 
-        coll = context_manager.chroma_client.get_collection(collection)
-        data = coll.get()
+        entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection, "MilitaryUnit")
+        entities = context_manager.kag.get_entities_by_type(entity_type)
 
-        if data["ids"]:
-            coll.delete(ids=data["ids"])
-            count = len(data["ids"])
+        if entities:
+            count = len(entities)
+            for entity in entities:
+                context_manager.kag.delete_entity(entity["id"])
             logger.info(f"成功清空{collection}集合，共删除{count}条记录")
             return {
                 "success": True,

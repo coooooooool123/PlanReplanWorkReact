@@ -1,20 +1,12 @@
 from typing import Dict
 from context_manager import ContextManager
-from config import LLM_CONFIG, RAG_CONFIG
+from config import LLM_CONFIG, KAG_CONFIG
 from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool
 import requests
 import json
 import logging
 
 logger = logging.getLogger(__name__)
-
-def save_task_to_rag(context_manager: ContextManager, user_task: str, plan: Dict):
-    """保存任务到tasks集合"""
-    context_manager.add_to_rag(
-        user_task,
-        {"type": "task", "plan": json.dumps(plan)},
-        collection="tasks"
-    )
 
 class PlanModule:
     def __init__(self, context_manager: ContextManager):
@@ -27,13 +19,6 @@ class PlanModule:
         }
 
     def generate_plan(self, user_task: str) -> Dict:
-        rag_tasks = []
-        if RAG_CONFIG.get("enable_tasks_collection", True):
-            rag_tasks = self.context_manager.load_dynamic_context(
-                user_task,
-                collection="tasks"
-            )
-
         rag_knowledge = self.context_manager.load_dynamic_context(
             user_task,
             collection="knowledge",
@@ -64,13 +49,9 @@ class PlanModule:
         if rag_equipment:
             equipment_text = "\n相关装备信息（含射程）:\n" + "\n".join([ctx.get("text", "") for ctx in rag_equipment])
 
-        tasks_text = ""
-        if rag_tasks:
-            tasks_text = "\n相关历史任务:\n" + json.dumps(rag_tasks, ensure_ascii=False)
-
         messages = [
             {"role": "system", "content": prompt_with_schema},
-            {"role": "user", "content": f"任务: {user_task}{knowledge_text}{equipment_text}{tasks_text}"}
+            {"role": "user", "content": f"任务: {user_task}{knowledge_text}{equipment_text}"}
         ]
 
         response = self._call_llm(messages)

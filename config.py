@@ -19,21 +19,13 @@ PATHS = {
     "context_dir": BASE_DIR / "context",
     "static_context_dir": BASE_DIR / "context" / "static",
     "dynamic_context_dir": BASE_DIR / "context" / "dynamic",
-    "chroma_db_dir": BASE_DIR / "context" / "dynamic" / "chroma_db",
+    "kag_storage_dir": BASE_DIR / "context" / "dynamic" / "kag_storage",
     "result_dir": BASE_DIR / "result"
-}
-
-CHROMA_CONFIG = {
-    "persist_directory": str(PATHS["chroma_db_dir"]),
-    "collection_tasks": "tasks",
-    "collection_executions": "executions",
-    "collection_knowledge": "knowledge",
-    "collection_equipment": "equipment"
 }
 
 EMBEDDING_MODEL = "BAAI/bge-large-zh-v1.5"
 
-RAG_CONFIG = {
+KAG_CONFIG = {
     "top_k": 2,
     "oversample": 2,
     "min_k": 2,
@@ -43,7 +35,9 @@ RAG_CONFIG = {
     "w_kw": 0.25,
     "metadata_boost_unit": 0.35,
     "metadata_boost_type": 0.10,
-    "enable_tasks_collection": False,
-    "enable_executions_collection": False,
-    "similarity_threshold": 0.7
+    "use_llm_reasoning": False,
+    "kg_storage_path": str(PATHS["kag_storage_dir"]),
+    "embedding_model": EMBEDDING_MODEL
 }
+
+RAG_CONFIG = KAG_CONFIG

@@ -169,6 +169,7 @@ class SlopeFilterTool(BaseTool):
         if not input_path or (min_slope is None and max_slope is None):
             gdf = gpd.read_file(input_path) if input_path else gpd.GeoDataFrame()
             if not gdf.empty:
+                os.makedirs(output_path.parent, exist_ok=True)
                 gdf.to_file(output_path, driver='GeoJSON')
             return {
                 "success": True,
@@ -180,6 +181,8 @@ class SlopeFilterTool(BaseTool):
         gdf = gpd.read_file(input_path)
         
         if gdf.empty:
+            os.makedirs(output_path.parent, exist_ok=True)
+            gdf.to_file(output_path, driver='GeoJSON')
             return {
                 "success": True,
                 "result_path": str(output_path),
@@ -204,6 +207,7 @@ class SlopeFilterTool(BaseTool):
             slope_series = pd.Series(slopes, index=gdf.index)
             filtered_gdf["slope_deg"] = slope_series.loc[valid_indices].values
         
+        os.makedirs(output_path.parent, exist_ok=True)
         filtered_gdf.to_file(output_path, driver='GeoJSON')
         
         return {

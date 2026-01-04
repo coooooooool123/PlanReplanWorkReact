@@ -1,7 +1,7 @@
 from typing import Dict, List, Any, Optional
 from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool
 from context_manager import ContextManager
-from config import LLM_CONFIG, RAG_CONFIG
+from config import LLM_CONFIG, KAG_CONFIG
 import requests
 import json
 
@@ -172,20 +172,13 @@ class WorkAgent:
                 "params": step_params
             })
 
-        rag_context = []
-        if RAG_CONFIG.get("enable_executions_collection", True):
-            rag_context = self.context_manager.load_dynamic_context(
-                step_description,
-                collection="executions"
-            )
-
         rag_equipment = self.context_manager.load_dynamic_context(
             step_description,
             collection="equipment",
             top_k=3
         )
 
-        thought = self._think(step, rag_context, rag_equipment)
+        thought = self._think(step, [], rag_equipment)
         action = self._extract_action(thought)
 
         if action and step_params:
@@ -289,20 +282,6 @@ class WorkAgent:
 
             is_success = result.get("success", False)
 
-            if is_success:
-                self.context_manager.add_to_rag(
-                    f"使用{tool_name}执行成功，参数: {json.dumps(params, ensure_ascii=False)}",
-                    {"tool": tool_name, "success": True, "result": json.dumps(result, ensure_ascii=False)},
-                    collection="executions"
-                )
-            else:
-                error_msg = result.get("error", "执行失败")
-                self.context_manager.add_to_rag(
-                    f"使用{tool_name}执行失败，参数: {json.dumps(params, ensure_ascii=False)}，错误: {error_msg}",
-                    {"tool": tool_name, "success": False, "error": error_msg},
-                    collection="executions"
-                )
-
             return {
                 "success": is_success,
                 "tool": tool_name,
@@ -312,11 +291,6 @@ class WorkAgent:
             }
         except Exception as e:
             error_msg = str(e)
-            self.context_manager.add_to_rag(
-                f"使用{tool_name}执行失败，参数: {json.dumps(params, ensure_ascii=False)}，错误: {error_msg}",
-                {"tool": tool_name, "success": False, "error": error_msg},
-                collection="executions"
-            )
             return {
                 "success": False,
                 "error": error_msg

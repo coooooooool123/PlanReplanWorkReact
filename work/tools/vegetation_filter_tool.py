@@ -198,6 +198,8 @@ class VegetationFilterTool(BaseTool):
         gdf = gpd.read_file(input_path)
 
         if gdf.empty:
+            os.makedirs(output_path.parent, exist_ok=True)
+            gdf.to_file(output_path, driver='GeoJSON')
             return {
                 "success": True,
                 "result_path": str(output_path),
@@ -206,6 +208,7 @@ class VegetationFilterTool(BaseTool):
             }
 
         if vegetation_types is None and exclude_types is None:
+            os.makedirs(output_path.parent, exist_ok=True)
             gdf.to_file(output_path, driver='GeoJSON')
             return {
                 "success": True,
@@ -240,6 +243,7 @@ class VegetationFilterTool(BaseTool):
             filtered_gdf['vegetation_code'] = veg_code_series.loc[valid_indices].values
             filtered_gdf['vegetation_type'] = veg_name_series.loc[valid_indices].values
 
+        os.makedirs(output_path.parent, exist_ok=True)
         filtered_gdf.to_file(output_path, driver='GeoJSON')
 
         return {

@@ -705,51 +705,6 @@ def main():
         if "db_refresh_key" not in st.session_state:
             st.session_state.db_refresh_key = 0
 
-        st.subheader("清空集合")
-        st.warning("⚠️ 清空操作不可恢复，请谨慎操作！")
-        clear_col1, clear_col2 = st.columns(2)
-        with clear_col1:
-            if st.button("🗑️ 清空 executions 集合", key="clear_executions", type="secondary"):
-                try:
-                    response = requests.delete(
-                        f"{API_URL}/api/knowledge/clear/executions",
-                        timeout=API_TIMEOUT
-                    )
-                    if response.status_code == 200:
-                        result = response.json()
-                        if result.get("success"):
-                            st.success(f"✓ {result.get('message', 'executions集合已清空')}")
-                            st.session_state.db_data = None
-                            st.session_state.tab3_should_load = True
-                            st.rerun()
-                        else:
-                            st.error(f"清空失败: {result.get('message', '未知错误')}")
-                    else:
-                        st.error(f"API请求失败: {response.status_code}")
-                except requests.exceptions.RequestException as e:
-                    st.error(f"连接API失败: {e}")
-
-        with clear_col2:
-            if st.button("🗑️ 清空 tasks 集合", key="clear_tasks", type="secondary"):
-                try:
-                    response = requests.delete(
-                        f"{API_URL}/api/knowledge/clear/tasks",
-                        timeout=API_TIMEOUT
-                    )
-                    if response.status_code == 200:
-                        result = response.json()
-                        if result.get("success"):
-                            st.success(f"✓ {result.get('message', 'tasks集合已清空')}")
-                            st.session_state.db_data = None
-                            st.session_state.tab3_should_load = True
-                            st.rerun()
-                        else:
-                            st.error(f"清空失败: {result.get('message', '未知错误')}")
-                    else:
-                        st.error(f"API请求失败: {response.status_code}")
-                except requests.exceptions.RequestException as e:
-                    st.error(f"连接API失败: {e}")
-
         st.markdown("---")
         if "tab3_should_load" not in st.session_state:
             st.session_state.tab3_should_load = False
@@ -758,8 +713,8 @@ def main():
         with col1:
             selected_collection = st.selectbox(
                 "选择集合",
-                options=["knowledge", "tasks", "executions"],
-                index=["knowledge", "tasks", "executions"].index(st.session_state.selected_collection) if st.session_state.selected_collection in ["knowledge", "tasks", "executions"] else 0,
+                options=["knowledge", "equipment"],
+                index=["knowledge", "equipment"].index(st.session_state.selected_collection) if st.session_state.selected_collection in ["knowledge", "equipment"] else 0,
                 key="collection_selector"
             )
             if selected_collection != st.session_state.selected_collection:
@@ -1098,8 +1053,6 @@ def main():
                     "name": "knowledge",
                     "count": 10
                 },
-                "tasks": {...},
-                "executions": {...}
             }
         }
         ```
@@ -1107,7 +1060,7 @@ def main():
         **功能**: 获取指定集合中的所有记录
 
         **查询参数**: 
-        - `collection` (可选): 集合名称，可选值: `knowledge`、`tasks`、`executions`，默认: `knowledge`
+        - `collection` (可选): 集合名称，可选值: `knowledge`、`equipment`，默认: `knowledge`
 
         **返回**:
         ```json

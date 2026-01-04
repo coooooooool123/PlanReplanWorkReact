@@ -78,6 +78,7 @@ class ElevationFilterTool(BaseTool):
         if not input_path or (min_elev is None and max_elev is None):
             gdf = gpd.read_file(input_path) if input_path else gpd.GeoDataFrame()
             if not gdf.empty:
+                os.makedirs(output_path.parent, exist_ok=True)
                 gdf.to_file(output_path, driver='GeoJSON')
             return {
                 "success": True,
@@ -89,6 +90,8 @@ class ElevationFilterTool(BaseTool):
         gdf = gpd.read_file(input_path)
         
         if gdf.empty:
+            os.makedirs(output_path.parent, exist_ok=True)
+            gdf.to_file(output_path, driver='GeoJSON')
             return {
                 "success": True,
                 "result_path": str(output_path),
@@ -113,6 +116,7 @@ class ElevationFilterTool(BaseTool):
             elevation_series = pd.Series(elevations, index=gdf.index)
             filtered_gdf['elevation'] = elevation_series.loc[valid_indices].values
         
+        os.makedirs(output_path.parent, exist_ok=True)
         filtered_gdf.to_file(output_path, driver='GeoJSON')
         
         return {
