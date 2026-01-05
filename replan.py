@@ -35,20 +35,19 @@ class ReplanModule:
         prompt_with_schema = f"{prompt_template}\n\n## 工具参数规范（动态获取）\n{tools_schema_text}"
 
         plan_text = json.dumps(original_plan, ensure_ascii=False)
-        rag_equipment = self.context_manager.load_dynamic_context(
+        rag_context = self.context_manager.load_dynamic_context(
             plan_text,
-            collection="equipment",
             top_k=3
         )
 
         plan_str = json.dumps(original_plan, ensure_ascii=False, indent=2)
         result_str = json.dumps(work_result, ensure_ascii=False, indent=2)
 
-        equipment_text = ""
-        if rag_equipment:
-            equipment_text = "\n\n相关装备信息（含射程）:\n" + "\n".join([ctx.get("text", "") for ctx in rag_equipment])
+        knowledge_text = ""
+        if rag_context:
+            knowledge_text = "\n\n相关知识:\n" + "\n".join([ctx.get("text", "") for ctx in rag_context])
 
-        user_content = f"请根据原计划和执行结果重写 JSON 计划\n\n原计划:\n{plan_str}\n\n执行结果:\n{result_str}{equipment_text}"
+        user_content = f"请根据原计划和执行结果重写 JSON 计划\n\n原计划:\n{plan_str}\n\n执行结果:\n{result_str}{knowledge_text}"
 
         messages = [
             {"role": "system", "content": prompt_with_schema},
@@ -75,19 +74,18 @@ class ReplanModule:
             prompt_with_schema = f"{prompt_template}\n\n## 工具参数规范（动态获取）\n{tools_schema_text}"
 
             plan_text = json.dumps(original_plan, ensure_ascii=False)
-            rag_equipment = self.context_manager.load_dynamic_context(
+            rag_context = self.context_manager.load_dynamic_context(
                 plan_text,
-                collection="equipment",
                 top_k=3
             )
 
             plan_str = json.dumps(original_plan, ensure_ascii=False, indent=2)
 
-            equipment_text = ""
-            if rag_equipment:
-                equipment_text = "\n\n相关装备信息（含射程）:\n" + "\n".join([ctx.get("text", "") for ctx in rag_equipment])
+            knowledge_text = ""
+            if rag_context:
+                knowledge_text = "\n\n相关知识:\n" + "\n".join([ctx.get("text", "") for ctx in rag_context])
 
-            user_content = f"请根据原计划和用户反馈重写 JSON 计划\n\n原计划:\n{plan_str}\n\n用户反馈:\n{feedback}{equipment_text}"
+            user_content = f"请根据原计划和用户反馈重写 JSON 计划\n\n原计划:\n{plan_str}\n\n用户反馈:\n{feedback}{knowledge_text}"
 
             messages = [
                 {"role": "system", "content": prompt_with_schema},

@@ -19,16 +19,10 @@ class PlanModule:
         }
 
     def generate_plan(self, user_task: str) -> Dict:
-        rag_knowledge = self.context_manager.load_dynamic_context(
+        # 统一知识库检索，不再区分collection
+        rag_context = self.context_manager.load_dynamic_context(
             user_task,
-            collection="knowledge",
-            top_k=3
-        )
-
-        rag_equipment = self.context_manager.load_dynamic_context(
-            user_task,
-            collection="equipment",
-            top_k=3
+            top_k=5
         )
 
         prompt = self.context_manager.load_static_context("plan_prompt")
@@ -42,16 +36,12 @@ class PlanModule:
         prompt_with_schema = f"{prompt}\n\n## 工具参数规范（动态获取）\n{tools_schema_text}"
 
         knowledge_text = ""
-        if rag_knowledge:
-            knowledge_text = "\n相关部署规则:\n" + "\n".join([ctx.get("text", "") for ctx in rag_knowledge])
-
-        equipment_text = ""
-        if rag_equipment:
-            equipment_text = "\n相关装备信息（含射程）:\n" + "\n".join([ctx.get("text", "") for ctx in rag_equipment])
+        if rag_context:
+            knowledge_text = "\n相关知识:\n" + "\n".join([ctx.get("text", "") for ctx in rag_context])
 
         messages = [
             {"role": "system", "content": prompt_with_schema},
-            {"role": "user", "content": f"任务: {user_task}{knowledge_text}{equipment_text}"}
+            {"role": "user", "content": f"任务: {user_task}{knowledge_text}"}
         ]
 
         response = self._call_llm(messages)
@@ -69,18 +59,10 @@ class PlanModule:
             logger.info(f"Plan阶段 - 步骤类型: {[s.get('type', 'N/A') for s in plan.get('steps', [])]}")
         plan["llm_response"] = response
 
-        plan["matched_rules"] = []
-        if rag_knowledge:
-            for ctx in rag_knowledge:
-                plan["matched_rules"].append({
-                    "text": ctx.get("text", ""),
-                    "metadata": ctx.get("metadata", {})
-                })
-
-        plan["matched_equipment"] = []
-        if rag_equipment:
-            for ctx in rag_equipment:
-                plan["matched_equipment"].append({
+        plan["matched_knowledge"] = []
+        if rag_context:
+            for ctx in rag_context:
+                plan["matched_knowledge"].append({
                     "text": ctx.get("text", ""),
                     "metadata": ctx.get("metadata", {})
                 })

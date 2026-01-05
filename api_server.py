@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException  # type: ignore
+from fastapi import FastAPI, HTTPException, Body  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
 from fastapi.responses import JSONResponse, FileResponse  # type: ignore
 from pydantic import BaseModel, Field  # type: ignore
@@ -22,7 +22,6 @@ try:
     from orchestrator import Orchestrator
     from context_manager import ContextManager
     from config import PATHS
-    from context.kag.schema import COLLECTION_TO_ENTITY_TYPE
 except ImportError:
     BASE_DIR_PARENT = BASE_DIR.parent
     if str(BASE_DIR_PARENT) not in sys.path:
@@ -30,7 +29,19 @@ except ImportError:
     from orchestrator import Orchestrator
     from context_manager import ContextManager
     from config import PATHS
-    from context.kag.schema import COLLECTION_TO_ENTITY_TYPE
+
+# 从KAG项目导入工具函数
+try:
+    kag_path = BASE_DIR / "KAG" / "kag" / "examples" / "MilitaryDeployment"
+    if str(kag_path) not in sys.path:
+        sys.path.insert(0, str(kag_path))
+    from KAG.kag.examples.MilitaryDeployment.utils import COLLECTION_TO_ENTITY_TYPE
+except ImportError:
+    # 向后兼容
+    COLLECTION_TO_ENTITY_TYPE = {
+        "knowledge": "MilitaryUnit",
+        "equipment": "Equipment"
+    }
 
 app = FastAPI(
     title="空地智能体API服务",
@@ -82,10 +93,6 @@ class TaskResponse(BaseModel):
     result: Dict[str, Any]
     message: Optional[str] = None
 
-class KnowledgeAddRequest(BaseModel):
-    text: str = Field(..., description="文本内容")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="元数据")
-    collection: str = Field(default="knowledge", description="集合名称")
 
 @app.get("/")
 async def root():
@@ -98,9 +105,10 @@ async def root():
             "/api/execute": "POST - 执行计划",
             "/api/task": "POST - 提交任务（完整流程）",
             "/api/tools": "GET - 获取工具列表",
-            "/api/collections": "GET - 获取所有集合信息",
-            "/api/knowledge": "GET - 获取集合数据, POST - 添加数据",
-            "/api/knowledge/{id}": "DELETE - 删除记录",
+            "/api/kg": "GET - 获取知识图谱信息（实体和关系统计）",
+            "/api/kg/entities": "GET - 获取实体列表",
+            "/api/kg/relations": "GET - 获取关系列表",
+            "/api/kag/query": "POST - 使用KAG推理能力回答问题",
             "/api/knowledge/update": "PUT - 批量更新knowledge集合",
             "/api/results": "GET - 获取所有结果文件列表",
             "/api/results/{filename}": "GET - 获取特定结果文件内容",
@@ -212,162 +220,127 @@ async def get_tools():
 async def health_check():
     return {"status": "healthy"}
 
-@app.get("/api/collections")
-async def get_collections():
-    """获取所有集合的基本信息"""
+@app.get("/api/kg")
+async def get_kg_info():
+    """获取知识图谱基本信息（实体和关系统计）"""
     try:
-        collections_info = {}
-        for collection_name in ["knowledge", "equipment"]:
-            try:
-                entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection_name, "MilitaryUnit")
-                entities = get_context_manager().kag.get_entities_by_type(entity_type)
-                collections_info[collection_name] = {
-                    "name": collection_name,
-                    "count": len(entities)
-                }
-            except Exception as e:
-                collections_info[collection_name] = {
-                    "name": collection_name,
-                    "count": 0,
-                    "error": str(e)
-                }
-        return {"success": True, "collections": collections_info}
-    except Exception as e:
-        logger.error(f"获取集合信息失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取集合信息失败: {str(e)}")
-
-@app.get("/api/knowledge")
-async def get_knowledge(collection: str = "knowledge"):
-    """获取指定集合的所有数据"""
-    try:
-        entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection, "MilitaryUnit")
-        entities = get_context_manager().kag.get_entities_by_type(entity_type)
-
-        items = []
-        for entity in entities:
-            items.append({
-                "id": entity["id"],
-                "text": entity.get("text", ""),
-                "metadata": entity.get("properties", {})
-            })
-
-        return {
-            "success": True,
-            "collection": collection,
-            "count": len(items),
-            "items": items
-        }
-    except Exception as e:
-        logger.error(f"获取{collection}集合数据失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取数据失败: {str(e)}")
-
-@app.post("/api/knowledge")
-async def add_knowledge(request: KnowledgeAddRequest):
-    """添加数据到指定集合"""
-    try:
-        collection = request.collection
-        entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection, "MilitaryUnit")
+        kg_data = get_context_manager().get_kg_data()
         
-        import time
-        from uuid import uuid4
-        timestamp_ms = int(time.time() * 1000)
-        unique_suffix = uuid4().hex[:8]
-        new_id = f"{collection}_{timestamp_ms}_{unique_suffix}"
-
-        properties = request.metadata.copy()
-        properties["text"] = request.text
-
-        get_context_manager().kag.add_entity(
-            entity_type=entity_type,
-            entity_id=new_id,
-            properties=properties,
-            text=request.text
-        )
-
-        logger.info(f"成功添加数据到{collection}集合，ID: {new_id}")
-
         return {
             "success": True,
-            "message": f"数据已添加到{collection}集合",
-            "id": new_id
+            "entity_count": kg_data.get("entity_count", 0),
+            "relation_count": kg_data.get("relation_count", 0),
+            "entities": kg_data.get("entities", []),
+            "relations": kg_data.get("relations", [])
         }
     except Exception as e:
-        logger.error(f"添加数据到{collection}集合失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"添加数据失败: {str(e)}")
+        logger.error(f"获取知识图谱信息失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取知识图谱信息失败: {str(e)}")
 
-@app.delete("/api/knowledge/{item_id}")
-async def delete_knowledge(item_id: str, collection: str = "knowledge"):
-    """删除指定集合中的特定记录"""
+@app.get("/api/kg/entities")
+async def get_kg_entities(entity_type: str = None, limit: int = 100):
+    """获取知识图谱实体列表"""
     try:
-        entity = get_context_manager().kag.get_entity(item_id)
-        if entity is None:
-            raise HTTPException(status_code=404, detail=f"记录 {item_id} 不存在")
-
-        get_context_manager().kag.delete_entity(item_id)
-
-        logger.info(f"成功从{collection}集合删除记录: {item_id}")
-
+        kg_data = get_context_manager().get_kg_data()
+        entities = kg_data.get("entities", [])
+        
+        # 如果指定了实体类型，进行过滤
+        if entity_type:
+            entities = [e for e in entities if e.get("type") == entity_type]
+        
+        # 限制返回数量
+        entities = entities[:limit]
+        
         return {
             "success": True,
-            "message": f"记录 {item_id} 已从{collection}集合删除"
+            "count": len(entities),
+            "entities": entities
         }
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"从{collection}集合删除记录失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"删除记录失败: {str(e)}")
+        logger.error(f"获取知识图谱实体失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取实体失败: {str(e)}")
 
-@app.delete("/api/knowledge/clear/{collection}")
-async def clear_collection(collection: str):
-    """清空指定集合的所有记录"""
+@app.get("/api/kg/relations")
+async def get_kg_relations(relation_type: str = None, limit: int = 100):
+    """获取知识图谱关系列表"""
     try:
-        allowed_collections = ["knowledge", "equipment"]
-        if collection not in allowed_collections:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"不允许清空{collection}集合。只允许清空: {', '.join(allowed_collections)}"
-            )
-
-        entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection, "MilitaryUnit")
-        entities = get_context_manager().kag.get_entities_by_type(entity_type)
-
-        if entities:
-            count = len(entities)
-            for entity in entities:
-                get_context_manager().kag.delete_entity(entity["id"])
-            logger.info(f"成功清空{collection}集合，共删除{count}条记录")
-            return {
-                "success": True,
-                "message": f"{collection}集合已清空，共删除{count}条记录",
-                "count": count
-            }
-        else:
-            return {
-                "success": True,
-                "message": f"{collection}集合已经是空的",
-                "count": 0
-            }
-    except HTTPException:
-        raise
+        kg_data = get_context_manager().get_kg_data()
+        relations = kg_data.get("relations", [])
+        
+        # 如果指定了关系类型，进行过滤
+        if relation_type:
+            relations = [r for r in relations if r.get("type") == relation_type]
+        
+        # 限制返回数量
+        relations = relations[:limit]
+        
+        return {
+            "success": True,
+            "count": len(relations),
+            "relations": relations
+        }
     except Exception as e:
-        logger.error(f"清空{collection}集合失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"清空集合失败: {str(e)}")
+        logger.error(f"获取知识图谱关系失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取关系失败: {str(e)}")
+
+@app.post("/api/kg/entities")
+async def add_kg_entity(request: Dict = Body(...)):
+    """添加实体到知识图谱（已废弃，请使用KAG开发者模式构建知识库）"""
+    raise HTTPException(
+        status_code=410,
+        detail="此接口已废弃。请使用KAG开发者模式来构建和更新知识库。"
+    )
+
+@app.delete("/api/kg/entities/{entity_id}")
+async def delete_kg_entity(entity_id: str):
+    """删除知识图谱中的实体（已废弃，请使用KAG开发者模式管理知识库）"""
+    raise HTTPException(
+        status_code=410,
+        detail="此接口已废弃。请使用KAG开发者模式来管理知识库。"
+    )
+
 
 @app.put("/api/knowledge/update")
 async def update_knowledge_base():
-    """批量更新knowledge集合（重新初始化军事单位部署规则）"""
-    try:
-        count = get_context_manager().update_knowledge_base()
-        logger.info(f"成功更新knowledge集合，共{count}条记录")
+    """
+    批量更新knowledge集合（已废弃）
+    
+    注意：此接口已废弃。请使用KAG开发者模式来构建和更新知识库：
+    1. 将文本数据文件放置在 KAG/kag/examples/MilitaryDeployment/builder/data/ 目录下
+    2. 运行 KAG/kag/examples/MilitaryDeployment/builder/indexer.py 构建知识库
+    """
+    raise HTTPException(
+        status_code=410, 
+        detail="此接口已废弃。请使用KAG开发者模式来构建知识库。"
+    )
 
+@app.post("/api/kag/query")
+async def kag_query(request: Dict = Body(...)):
+    """
+    使用KAG推理能力回答问题
+    
+    请求体：
+    {
+        "question": "轻步兵应该部署在什么位置？"
+    }
+    """
+    try:
+        question = request.get("question", "")
+        if not question:
+            raise HTTPException(status_code=400, detail="问题不能为空")
+        
+        context_manager = get_context_manager()
+        result = context_manager.query_with_kag_reasoning(question)
+        
         return {
             "success": True,
-            "message": f"knowledge集合已更新",
-            "count": count
+            "answer": result.get("answer", ""),
+            "references": result.get("references", []),
+            "method": result.get("method", "kag_reasoning")
         }
     except Exception as e:
-        logger.error(f"更新knowledge集合失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"更新knowledge集合失败: {str(e)}")
+        logger.error(f"KAG推理查询失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"KAG推理查询失败: {str(e)}")
 
 @app.get("/api/results")
 async def get_results_list():

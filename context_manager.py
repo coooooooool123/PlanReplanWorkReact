@@ -7,17 +7,35 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
 from sentence_transformers import SentenceTransformer
+import torch
 from config import PATHS, EMBEDDING_MODEL, KAG_CONFIG, LLM_CONFIG
-from context.kag.kag_adapter import KAGAdapter
-from context.kag.schema import COLLECTION_TO_ENTITY_TYPE
+from context.kag_solver import KAGSolver
+
+# 从KAG项目导入工具函数
+try:
+    import sys
+    from pathlib import Path
+    kag_path = Path(__file__).parent.parent / "KAG" / "kag" / "examples" / "MilitaryDeployment"
+    if str(kag_path) not in sys.path:
+        sys.path.insert(0, str(kag_path))
+    from KAG.kag.examples.MilitaryDeployment.utils import COLLECTION_TO_ENTITY_TYPE
+except ImportError:
+    # 向后兼容：如果无法导入，使用默认值
+    COLLECTION_TO_ENTITY_TYPE = {
+        "knowledge": "MilitaryUnit",
+        "equipment": "Equipment"
+    }
 
 logger = logging.getLogger(__name__)
 
 class ContextManager:
     def __init__(self):
         self.static_context: Dict[str, str] = {}
-        self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info(f"使用设备: {device} 进行embedding计算")
+        self.embedding_model = SentenceTransformer(EMBEDDING_MODEL, device=device)
         self._init_kag()
+        self._init_kag_solver()
         self._load_static_context()
 
     def _embed_query(self, query: str) -> List[float]:
@@ -30,44 +48,21 @@ class ContextManager:
         prefixed_text = f"passage: {text}"
         return self.embedding_model.encode(prefixed_text).tolist()
 
-    def _route_collection(self, query: str) -> List[str]:
-        """根据查询内容路由到相应的collection(s)，支持多库并查"""
-        query_lower = query.lower()
-        collections = []
-        
-        equipment_keywords = ["射程", "最大射程", "range", "max_range", "有效射程"]
-        if any(kw in query for kw in equipment_keywords):
-            collections.append("equipment")
-        
-        knowledge_keywords = [
-            "部署", "配置", "坡度", "高程", "缓冲距离", "地表", "隐蔽", "机动"
-        ]
-        unit_names = [
-            "轻步兵", "重装步兵", "机械化步兵", "坦克部队", "反坦克步兵",
-            "自行火炮", "牵引火炮", "防空部队", "狙击手", "特种部队",
-            "装甲侦察单位", "工兵部队", "后勤保障部队", "指挥单位", "无人机侦察控制单元"
-        ]
-        has_unit = any(unit in query for unit in unit_names)
-        
-        if any(kw in query for kw in knowledge_keywords) or has_unit:
-            collections.append("knowledge")
-        
-        if not collections:
-            collections.append("knowledge")
-        
-        return list(set(collections))
 
     def _init_kag(self):
-        """初始化KAG知识图谱适配器"""
-        use_openspg = KAG_CONFIG.get("use_openspg", True)
-        self.kag = KAGAdapter(
-            use_openspg=use_openspg,
-            embedding_model_name=KAG_CONFIG["embedding_model"],
-            llm_config=LLM_CONFIG,
-            kag_config=KAG_CONFIG,
-            kg_storage_path=KAG_CONFIG["kg_storage_path"]
-        )
-        logger.info("KAG知识图谱适配器初始化完成")
+        """初始化KAG知识图谱适配器（已废弃，仅保留接口兼容性）"""
+        # 旧版KAGAdapter已移除，现在使用KAG开发者模式
+        self.kag = None
+        logger.info("KAG适配器已废弃，请使用KAG开发者模式")
+    
+    def _init_kag_solver(self):
+        """初始化KAG推理问答器（新版，基于KAG开发者模式）"""
+        try:
+            self.kag_solver = KAGSolver()
+            logger.info("KAG推理问答器初始化完成")
+        except Exception as e:
+            logger.warning(f"KAG推理器初始化失败: {e}")
+            self.kag_solver = None
 
     def _load_static_context(self):
         static_file = PATHS["static_context_dir"] / "prompts.json"
@@ -97,26 +92,17 @@ class ContextManager:
     def load_static_context(self, context_type: str) -> str:
         return self.static_context.get(context_type, "")
 
-    def add_to_rag(self, text: str, metadata: Dict, collection: str = "knowledge"):
-        """添加文档到KAG知识图谱，使用UUID+时间戳生成唯一ID"""
-        entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection, "MilitaryUnit")
-
-        timestamp_ms = int(time.time() * 1000)
-        unique_suffix = uuid4().hex[:8]
-        entity_id = f"{collection}_{timestamp_ms}_{unique_suffix}"
-
-        properties = metadata.copy()
-        properties['created_at'] = timestamp_ms
-        properties['text'] = text
-
-        self.kag.add_entity(
-            entity_type=entity_type,
-            entity_id=entity_id,
-            properties=properties,
-            text=text
-        )
-        
-        logger.debug(f"已添加实体到KAG: {entity_type}/{entity_id}")
+    def get_kg_data(self) -> Dict:
+        """获取知识图谱数据（实体和关系）"""
+        if self.kag_solver:
+            return self.kag_solver.get_kg_data()
+        return {
+            "entities": [],
+            "relations": [],
+            "entity_count": 0,
+            "relation_count": 0,
+            "error": "KAG推理器未初始化"
+        }
 
     def _extract_keywords(self, query: str) -> List[str]:
         """从查询中提取关键词：中文词块、数字、下划线、工具名等"""
@@ -193,59 +179,53 @@ class ContextManager:
 
         return boost
 
-    def _retrieve_from_collection(
+    def _retrieve_from_kag(
         self, 
-        collection: str, 
         query: str, 
         query_embedding: List[float],
         oversample: int
     ) -> List[Dict]:
-        """从KAG知识图谱中检索候选实体"""
-        entity_type = COLLECTION_TO_ENTITY_TYPE.get(collection, "MilitaryUnit")
-        n_results = KAG_CONFIG["top_k"] * oversample
+        """从KAG知识图谱中检索候选实体（使用KAG推理器）"""
+        # 使用新的KAG推理器进行检索
+        if self.kag_solver:
+            try:
+                result = self.kag_solver.query(query)
+                # 将KAG推理结果转换为检索格式
+                candidates = []
+                if result.get("references"):
+                    for ref in result["references"]:
+                        candidates.append({
+                            "text": ref.get("text", ""),
+                            "metadata": ref.get("metadata", {}),
+                            "distance": ref.get("distance", 0.0)
+                        })
+                return candidates
+            except Exception as e:
+                logger.warning(f"KAG推理器检索失败: {e}")
         
-        results = self.kag.query(
-            query_text=query,
-            entity_types=[entity_type] if entity_type else None,
-            top_k=n_results,
-            max_distance=KAG_CONFIG["max_distance"] * 2,
-            use_llm_reasoning=KAG_CONFIG.get("use_llm_reasoning", False)
-        )
-
-        candidates = []
-        for result in results:
-            candidates.append({
-                "text": result["text"],
-                "metadata": result["metadata"],
-                "distance": result["distance"],
-                "collection": collection
-            })
-
-        return candidates
+        # 如果KAG推理器不可用，返回空结果
+        logger.warning("KAG推理器未初始化，返回空结果")
+        return []
 
     def load_dynamic_context(self, query: str, top_k: int = None, collection: str = None) -> List[Dict]:
-        """混合检索：关键词粗召回 + 向量精排/融合，支持多库并查和距离阈值过滤"""
+        """从KAG知识图谱检索上下文（统一知识库，不再区分collection）"""
         if top_k is None:
             top_k = KAG_CONFIG["top_k"]
 
-        if collection is None:
-            target_collections = self._route_collection(query)
-        else:
-            target_collections = [collection]
+        # collection参数已废弃，保留仅用于向后兼容
+        if collection:
+            logger.warning("collection参数已废弃，现在使用统一知识库")
 
-        logger.info(f"[KAG路由] query='{query}' → collections={target_collections}")
+        logger.info(f"[KAG检索] query='{query}'")
 
         keywords = self._extract_keywords(query)
         logger.info(f"[KAG关键词] extracted keywords={keywords}")
 
-        all_candidates = []
-        for coll_name in target_collections:
-            query_embedding = self._embed_query(query)
-            candidates = self._retrieve_from_collection(
-                coll_name, query, query_embedding, KAG_CONFIG["oversample"]
-            )
-            all_candidates.extend(candidates)
-            logger.info(f"[KAG召回] collection={coll_name}, candidates={len(candidates)}")
+        query_embedding = self._embed_query(query)
+        all_candidates = self._retrieve_from_kag(
+            query, query_embedding, KAG_CONFIG["oversample"]
+        )
+        logger.info(f"[KAG召回] candidates={len(all_candidates)}")
 
         if not all_candidates:
             logger.warning("[KAG] 未找到任何候选文档")
@@ -317,8 +297,7 @@ class ContextManager:
         logger.info(f"[KAG最终结果] 返回{len(final_results)}条:")
         for i, result in enumerate(final_results):
             logger.info(
-                f"  [{i+1}] collection={result['collection']}, "
-                f"distance={result['distance']:.3f}, "
+                f"  [{i+1}] distance={result['distance']:.3f}, "
                 f"semantic={result['semantic_score']:.3f}, "
                 f"keyword={result['keyword_score']:.3f}, "
                 f"metadata_boost={result['metadata_boost']:.3f}, "
@@ -336,11 +315,46 @@ class ContextManager:
                 "keyword_score": result["keyword_score"],
                 "metadata_boost": result["metadata_boost"],
                 "final_score": result["final_score"],
-                "low_confidence": result.get("low_confidence", False),
-                "collection": result["collection"]
+                "low_confidence": result.get("low_confidence", False)
             })
 
         return contexts
+    
+    def query_with_kag_reasoning(self, question: str, use_old_system: bool = False) -> Dict:
+        """
+        使用KAG推理能力回答问题（推荐使用）
+        
+        Args:
+            question: 用户问题
+            use_old_system: 是否使用旧系统（向后兼容）
+            
+        Returns:
+            包含答案和引用的字典
+        """
+        # 优先使用新的KAG推理器
+        if self.kag_solver and not use_old_system:
+            try:
+                # 先尝试用旧的检索系统获取上下文
+                context = self.load_dynamic_context(question, top_k=3)
+                result = self.kag_solver.query_with_context(question, context)
+                return result
+            except Exception as e:
+                logger.warning(f"KAG推理查询失败，回退到旧系统: {e}")
+        
+        # 回退到旧的检索系统
+        if self.kag:
+            context = self.load_dynamic_context(question, top_k=3)
+            return {
+                "answer": "\n".join([ctx.get("text", "") for ctx in context]),
+                "references": context,
+                "method": "retrieval_only"
+            }
+        
+        return {
+            "answer": "",
+            "references": [],
+            "error": "KAG系统未初始化"
+        }
 
     def save_context(self, context_id: str, data: Dict):
         context_file = PATHS["context_dir"] / f"{context_id}.json"
@@ -365,46 +379,28 @@ class ContextManager:
         return compressed
 
     def update_knowledge_base(self):
-        """更新knowledge集合，清除旧数据并重新初始化军事单位部署规则"""
-        try:
-            from update_knowledge import get_military_units_rules
-            
-            existing_entities = self.kag.get_entities_by_type("MilitaryUnit")
-            for entity in existing_entities:
-                self.kag.delete_entity(entity["id"])
-
-            knowledge_text = get_military_units_rules()
-            count = self.kag.extract_entities_from_text(
-                text=knowledge_text,
-                entity_type="MilitaryUnit",
-                collection_name="knowledge"
-            )
-
-            return count
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            raise Exception(f"更新知识库失败: {str(e)}")
+        """
+        更新knowledge集合（已废弃，请使用KAG开发者模式）
+        
+        注意：此方法已废弃。请使用KAG开发者模式来构建和更新知识库：
+        1. 将文本数据文件放置在 KAG/kag/examples/MilitaryDeployment/builder/data/ 目录下
+        2. 运行 KAG/kag/examples/MilitaryDeployment/builder/indexer.py 构建知识库
+        """
+        logger.warning("update_knowledge_base() 已废弃，请使用KAG开发者模式")
+        raise NotImplementedError(
+            "此方法已废弃。请使用KAG开发者模式来构建知识库：\n"
+            "1. 运行 KAG/kag/examples/MilitaryDeployment/prepare_data.py 准备数据\n"
+            "2. 运行 KAG/kag/examples/MilitaryDeployment/builder/indexer.py 构建知识库"
+        )
 
     def update_equipment_base(self):
-        """更新equipment集合，清除旧数据并重新初始化装备信息"""
-        try:
-            from update_equipment import get_equipment_info
-            
-            existing_entities = self.kag.get_entities_by_type("Equipment")
-            for entity in existing_entities:
-                self.kag.delete_entity(entity["id"])
-
-            equipment_text = get_equipment_info()
-            count = self.kag.extract_entities_from_text(
-                text=equipment_text,
-                entity_type="Equipment",
-                collection_name="equipment"
-            )
-
-            return count
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            raise Exception(f"更新装备信息库失败: {str(e)}")
+        """
+        更新equipment集合（已废弃，请使用KAG开发者模式）
+        
+        注意：此方法已废弃。请使用KAG开发者模式来构建和更新知识库。
+        """
+        logger.warning("update_equipment_base() 已废弃，请使用KAG开发者模式")
+        raise NotImplementedError(
+            "此方法已废弃。请使用KAG开发者模式来构建知识库。"
+        )
 

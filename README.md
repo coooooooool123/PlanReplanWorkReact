@@ -66,8 +66,8 @@
 │       │  ContextManager (上下文管理)                    │
 │       │  - 静态上下文(提示词)                           │
 │       │  - 动态上下文(OpenSPG KAG)                       │
-│       │  - KAGAdapter (知识抽取与检索)                  │
-│       │  - OpenSPGAdapter (原生抽取器)                  │
+│       │  - KAGSolver (KAG推理问答接口)                  │
+│       │  - KAG开发者模式 (知识图谱构建与推理)            │
 │       └────────────┬────────────┘                      │
 └────────────────────┼────────────────────────────────────┘
                      │
@@ -171,23 +171,20 @@
 #### 5. **ContextManager（上下文管理器）**
 智能体的"记忆"系统：
 - **静态上下文**：管理提示词模板（plan_prompt, replan_prompt, work_prompt, system_prompt）
-- **动态上下文**：OpenSPG KAG知识图谱，支持知识增强生成
-  - `knowledge`集合：领域知识（军事单位部署规则）
-  - `equipment`集合：装备信息（含射程等）
-- **OpenSPG原生抽取流程**：
-  1. **文本预处理**：将长文本切分为重叠的chunks（每chunk 4-8句，overlap 1-2句）
-  2. **Schema-Free抽取**：使用OpenSPG SDK的SchemaFreeExtractor对每个chunk进行实体和关系抽取
-  3. **证据验证**：验证实体名称必须在chunk文本中出现，过滤无关实体
-  4. **类型约束**：验证实体类型和关系类型符合预定义Schema白名单
-  5. **数值规范化**：自动解析范围字符串为结构化数值字段（min/max）
-  6. **跨chunk合并**：合并所有chunk的抽取结果，去重实体和关系
-  7. **日志记录**：保存每个chunk的输入、LLM响应和解析结果到日志文件
-- **KAG知识图谱检索**：
+- **动态上下文**：KAG知识图谱，支持知识增强生成和推理问答
+  - 统一知识库：不再区分collection，所有知识统一管理
+  - KAG开发者模式：使用KAG框架构建和查询知识图谱
+- **KAG知识图谱构建**（通过KAG开发者模式）：
+  1. **数据准备**：将文本数据放置在 `KAG/kag/examples/MilitaryDeployment/builder/data/` 目录
+  2. **Schema定义**：在 `schema/MilitaryDeployment.schema` 中定义实体和关系类型
+  3. **知识抽取**：运行 `builder/indexer.py` 使用KAG框架进行知识抽取
+  4. **知识存储**：知识自动存储到OpenSPG图数据库
+- **KAG知识图谱检索与推理**：
   - **Embedding模型**：BAAI/bge-large-zh-v1.5（中文优化）
   - **问答模型**：qwen3:32b（本地部署，温度0.1用于抽取）
   - **距离度量**：统一使用cosine距离，确保阈值可解释
   - **BGE前缀优化**：query添加"query: "前缀，passage添加"passage: "前缀
-  - **智能路由**：根据关键词自动选择实体类型
+  - **统一检索**：不再区分collection，统一从知识图谱检索
   - **混合打分**：语义相似度(75%) + 关键词匹配(25%) + 元数据加分
   - **质量过滤**：距离阈值过滤 + 动态top_k调整
   - **详细日志**：记录路由、召回、过滤、打分全过程，便于调参
@@ -346,11 +343,7 @@ AIgen/
     │       ├── kg.json      # 知识图谱数据（实体、关系、向量）
     │       └── logs/        # 抽取日志
     │           └── extract_YYYYMMDD/
-    └── kag/                 # KAG适配器
-        ├── kag_adapter.py   # KAG适配器（文本切分、证据验证、去重）
-        ├── openspg_adapter.py # OpenSPG原生抽取器
-        ├── openspg_schema.py  # OpenSPG Schema定义
-        └── schema.py         # 旧Schema映射
+    └── kag_solver.py        # KAG推理问答接口
 ```
 
 ## 🔄 关键设计改进
@@ -666,7 +659,7 @@ curl "http://localhost:8000/api/collections"
 - 修改 `config.py` 中的 `KAG_CONFIG` 参数
 - `chunk_size`: chunk大小（建议4-8句）
 - `overlap`: chunk重叠（建议1-2句）
-- 修改 `openspg_adapter.py` 中的prompt模板优化抽取效果
+- 修改KAG项目中的prompt模板优化抽取效果（位于 `KAG/kag/examples/MilitaryDeployment/`）
 - 查看抽取日志分析效果，根据实际情况调整参数
 
 **KAG检索调参**：

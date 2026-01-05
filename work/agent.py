@@ -172,13 +172,12 @@ class WorkAgent:
                 "params": step_params
             })
 
-        rag_equipment = self.context_manager.load_dynamic_context(
+        rag_context = self.context_manager.load_dynamic_context(
             step_description,
-            collection="equipment",
             top_k=3
         )
 
-        thought = self._think(step, [], rag_equipment)
+        thought = self._think(step, rag_context)
         action = self._extract_action(thought)
 
         if action and step_params:
@@ -210,7 +209,7 @@ class WorkAgent:
                 "error": "无法确定执行动作"
             }
 
-    def _think(self, step: Dict, rag_context: List[Dict], rag_equipment: List[Dict] = None) -> str:
+    def _think(self, step: Dict, rag_context: List[Dict]) -> str:
         prompt = self.context_manager.load_static_context("work_prompt")
 
         tools_schema = []
@@ -225,9 +224,6 @@ class WorkAgent:
         if rag_context:
             rag_text = "\n相关执行历史:\n" + "\n".join([ctx.get("text", "") for ctx in rag_context[:3]])
 
-        if rag_equipment:
-            equipment_text = "\n相关装备信息（含射程）:\n" + "\n".join([ctx.get("text", "") for ctx in rag_equipment])
-            rag_text += equipment_text
 
         previous_result = step.get("last_result_path", "")
         if previous_result:
