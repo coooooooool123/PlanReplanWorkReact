@@ -1,30 +1,13 @@
 import json
 import os
-import time
 import logging
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-from uuid import uuid4
+from typing import Dict, List, Optional
 from sentence_transformers import SentenceTransformer
 import torch
-from config import PATHS, EMBEDDING_MODEL, KAG_CONFIG, LLM_CONFIG
+from config import PATHS, EMBEDDING_MODEL, KAG_CONFIG
 from context.kag_solver import KAGSolver
-
-# 从KAG项目导入工具函数
-try:
-    import sys
-    from pathlib import Path
-    kag_path = Path(__file__).parent.parent / "KAG" / "kag" / "examples" / "MilitaryDeployment"
-    if str(kag_path) not in sys.path:
-        sys.path.insert(0, str(kag_path))
-    from KAG.kag.examples.MilitaryDeployment.utils import COLLECTION_TO_ENTITY_TYPE
-except ImportError:
-    # 向后兼容：如果无法导入，使用默认值
-    COLLECTION_TO_ENTITY_TYPE = {
-        "knowledge": "MilitaryUnit",
-        "equipment": "Equipment"
-    }
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +17,6 @@ class ContextManager:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info(f"使用设备: {device} 进行embedding计算")
         self.embedding_model = SentenceTransformer(EMBEDDING_MODEL, device=device)
-        self._init_kag()
         self._init_kag_solver()
         self._load_static_context()
 
@@ -48,12 +30,6 @@ class ContextManager:
         prefixed_text = f"passage: {text}"
         return self.embedding_model.encode(prefixed_text).tolist()
 
-
-    def _init_kag(self):
-        """初始化KAG知识图谱适配器（已废弃，仅保留接口兼容性）"""
-        # 旧版KAGAdapter已移除，现在使用KAG开发者模式
-        self.kag = None
-        logger.info("KAG适配器已废弃，请使用KAG开发者模式")
     
     def _init_kag_solver(self):
         """初始化KAG推理问答器（新版，基于KAG开发者模式）"""
@@ -75,9 +51,7 @@ class ContextManager:
                 "请创建 context/static/prompts.json 文件，包含 plan_prompt, replan_prompt, work_prompt, system_prompt 字段"
             )
         
-        # 不再自动初始化知识图谱数据
-        # 只有在通过API、更新脚本或前端明确调用update_knowledge_base()或update_equipment_base()时才会进行抽取
-        logger.info("知识图谱已加载，等待用户主动更新")
+        logger.info("静态上下文已加载")
 
     def _save_static_context(self):
         os.makedirs(PATHS["static_context_dir"], exist_ok=True)
@@ -207,14 +181,19 @@ class ContextManager:
         logger.warning("KAG推理器未初始化，返回空结果")
         return []
 
-    def load_dynamic_context(self, query: str, top_k: int = None, collection: str = None) -> List[Dict]:
-        """从KAG知识图谱检索上下文（统一知识库，不再区分collection）"""
+    def load_dynamic_context(self, query: str, top_k: int = None) -> List[Dict]:
+        """
+        从KAG知识图谱检索上下文
+        
+        Args:
+            query: 查询文本
+            top_k: 返回结果数量，默认使用配置值
+            
+        Returns:
+            检索到的上下文列表
+        """
         if top_k is None:
             top_k = KAG_CONFIG["top_k"]
-
-        # collection参数已废弃，保留仅用于向后兼容
-        if collection:
-            logger.warning("collection参数已废弃，现在使用统一知识库")
 
         logger.info(f"[KAG检索] query='{query}'")
 
@@ -320,41 +299,36 @@ class ContextManager:
 
         return contexts
     
-    def query_with_kag_reasoning(self, question: str, use_old_system: bool = False) -> Dict:
+    def query_with_kag_reasoning(self, question: str) -> Dict:
         """
-        使用KAG推理能力回答问题（推荐使用）
+        使用KAG推理能力回答问题
         
         Args:
             question: 用户问题
-            use_old_system: 是否使用旧系统（向后兼容）
             
         Returns:
             包含答案和引用的字典
         """
-        # 优先使用新的KAG推理器
-        if self.kag_solver and not use_old_system:
-            try:
-                # 先尝试用旧的检索系统获取上下文
-                context = self.load_dynamic_context(question, top_k=3)
-                result = self.kag_solver.query_with_context(question, context)
-                return result
-            except Exception as e:
-                logger.warning(f"KAG推理查询失败，回退到旧系统: {e}")
-        
-        # 回退到旧的检索系统
-        if self.kag:
-            context = self.load_dynamic_context(question, top_k=3)
+        if not self.kag_solver:
+            logger.warning("KAG推理器未初始化")
             return {
-                "answer": "\n".join([ctx.get("text", "") for ctx in context]),
-                "references": context,
-                "method": "retrieval_only"
+                "answer": "",
+                "references": [],
+                "error": "KAG推理器未初始化"
             }
         
-        return {
-            "answer": "",
-            "references": [],
-            "error": "KAG系统未初始化"
-        }
+        try:
+            # 先获取上下文
+            context = self.load_dynamic_context(question, top_k=3)
+            result = self.kag_solver.query_with_context(question, context)
+            return result
+        except Exception as e:
+            logger.error(f"KAG推理查询失败: {e}", exc_info=True)
+            return {
+                "answer": "",
+                "references": [],
+                "error": str(e)
+            }
 
     def save_context(self, context_id: str, data: Dict):
         context_file = PATHS["context_dir"] / f"{context_id}.json"
@@ -378,29 +352,4 @@ class ContextManager:
         }
         return compressed
 
-    def update_knowledge_base(self):
-        """
-        更新knowledge集合（已废弃，请使用KAG开发者模式）
-        
-        注意：此方法已废弃。请使用KAG开发者模式来构建和更新知识库：
-        1. 将文本数据文件放置在 KAG/kag/examples/MilitaryDeployment/builder/data/ 目录下
-        2. 运行 KAG/kag/examples/MilitaryDeployment/builder/indexer.py 构建知识库
-        """
-        logger.warning("update_knowledge_base() 已废弃，请使用KAG开发者模式")
-        raise NotImplementedError(
-            "此方法已废弃。请使用KAG开发者模式来构建知识库：\n"
-            "1. 运行 KAG/kag/examples/MilitaryDeployment/prepare_data.py 准备数据\n"
-            "2. 运行 KAG/kag/examples/MilitaryDeployment/builder/indexer.py 构建知识库"
-        )
-
-    def update_equipment_base(self):
-        """
-        更新equipment集合（已废弃，请使用KAG开发者模式）
-        
-        注意：此方法已废弃。请使用KAG开发者模式来构建和更新知识库。
-        """
-        logger.warning("update_equipment_base() 已废弃，请使用KAG开发者模式")
-        raise NotImplementedError(
-            "此方法已废弃。请使用KAG开发者模式来构建知识库。"
-        )
 

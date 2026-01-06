@@ -1,8 +1,8 @@
 from typing import Dict, List
 from context_manager import ContextManager
-from config import LLM_CONFIG
 from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool
-import requests
+from utils.llm_utils import call_llm, parse_plan_response
+from utils.tool_utils import get_tools_schema_text
 import json
 import logging
 
@@ -26,12 +26,7 @@ class ReplanModule:
     def replan(self, original_plan: Dict, work_result: Dict, available_tools: List[str]) -> Dict:
         prompt_template = self.context_manager.load_static_context("replan_prompt")
 
-        tools_schema = []
-        for tool_name, tool in self.tools.items():
-            schema = tool.get_schema()
-            tools_schema.append(json.dumps(schema, ensure_ascii=False, indent=2))
-
-        tools_schema_text = "\n\n".join(tools_schema)
+        tools_schema_text = get_tools_schema_text(self.tools)
         prompt_with_schema = f"{prompt_template}\n\n## 工具参数规范（动态获取）\n{tools_schema_text}"
 
         plan_text = json.dumps(original_plan, ensure_ascii=False)
@@ -54,8 +49,8 @@ class ReplanModule:
             {"role": "user", "content": user_content}
         ]
 
-        response = self._call_llm(messages)
-        new_plan = self._parse_plan(response)
+        response = call_llm(messages)
+        new_plan = parse_plan_response(response)
 
         return new_plan
 
@@ -65,12 +60,7 @@ class ReplanModule:
 
             prompt_template = self.context_manager.load_static_context("replan_prompt")
 
-            tools_schema = []
-            for tool_name, tool in self.tools.items():
-                schema = tool.get_schema()
-                tools_schema.append(json.dumps(schema, ensure_ascii=False, indent=2))
-
-            tools_schema_text = "\n\n".join(tools_schema)
+            tools_schema_text = get_tools_schema_text(self.tools)
             prompt_with_schema = f"{prompt_template}\n\n## 工具参数规范（动态获取）\n{tools_schema_text}"
 
             plan_text = json.dumps(original_plan, ensure_ascii=False)
@@ -93,10 +83,10 @@ class ReplanModule:
             ]
 
             logger.info("调用LLM生成新计划...")
-            response = self._call_llm(messages)
+            response = call_llm(messages)
             logger.info(f"LLM响应长度: {len(response)}")
 
-            new_plan = self._parse_plan(response)
+            new_plan = parse_plan_response(response)
 
             if not new_plan:
                 raise ValueError("解析计划失败，返回的计划为空")
@@ -111,67 +101,3 @@ class ReplanModule:
             logger.error(f"重新规划失败: {str(e)}", exc_info=True)
             raise Exception(f"重新规划失败: {str(e)}")
 
-    def _call_llm(self, messages: list) -> str:
-        payload = {
-            **LLM_CONFIG,
-            "messages": messages
-        }
-
-        try:
-            response = requests.post(LLM_CONFIG["api_endpoint"], json=payload, timeout=LLM_CONFIG.get("timeout", 120))
-            response.raise_for_status()
-            result = response.json()
-
-            if "choices" not in result or len(result["choices"]) == 0:
-                raise ValueError("LLM响应格式错误：缺少choices字段")
-
-            return result["choices"][0]["message"]["content"]
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"LLM API调用失败: {str(e)}")
-        except (KeyError, IndexError) as e:
-            raise Exception(f"LLM响应解析失败: {str(e)}, 响应: {result}")
-
-    def _parse_plan(self, response: str) -> Dict:
-        import re
-
-        json_block_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', response)
-        if json_block_match:
-            try:
-                plan = json.loads(json_block_match.group(1))
-                if "steps" not in plan:
-                    plan["steps"] = []
-                if "estimated_steps" not in plan:
-                    plan["estimated_steps"] = len(plan.get("steps", []))
-                return plan
-            except Exception as e:
-                logger.warning(f"解析JSON代码块失败: {e}")
-                pass
-
-        json_match = None
-        for match in re.finditer(r'\{[\s\S]*\}', response):
-            try:
-                test_json = json.loads(match.group())
-                json_match = match
-                break
-            except:
-                continue
-
-        if json_match:
-            try:
-                plan = json.loads(json_match.group())
-                if "steps" not in plan:
-                    plan["steps"] = []
-                if "estimated_steps" not in plan:
-                    plan["estimated_steps"] = len(plan.get("steps", []))
-                return plan
-            except Exception as e:
-                logger.warning(f"解析JSON对象失败: {e}")
-                pass
-
-        return {
-            "task": "",
-            "goal": response[:200] if response else "",
-            "steps": [],
-            "estimated_steps": 0,
-            "reason": "解析失败"
-        }

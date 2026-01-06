@@ -151,7 +151,7 @@ class KAGSolver:
                 # 获取项目配置
                 project_config = KAG_CONFIG.all_config.get("project", {})
                 host_addr = project_config.get("host_addr", "http://127.0.0.1:8887")
-                namespace = project_config.get("namespace", "MilitaryDeployment")
+                namespace = project_config.get("namespace", "MilitaryDeploy")
                 
                 # 创建客户端
                 graph_client = GraphClient(host_addr=host_addr)

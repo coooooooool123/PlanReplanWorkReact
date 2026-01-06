@@ -30,18 +30,6 @@ except ImportError:
     from context_manager import ContextManager
     from config import PATHS
 
-# 从KAG项目导入工具函数
-try:
-    kag_path = BASE_DIR / "KAG" / "kag" / "examples" / "MilitaryDeployment"
-    if str(kag_path) not in sys.path:
-        sys.path.insert(0, str(kag_path))
-    from KAG.kag.examples.MilitaryDeployment.utils import COLLECTION_TO_ENTITY_TYPE
-except ImportError:
-    # 向后兼容
-    COLLECTION_TO_ENTITY_TYPE = {
-        "knowledge": "MilitaryUnit",
-        "equipment": "Equipment"
-    }
 
 app = FastAPI(
     title="空地智能体API服务",

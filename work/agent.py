@@ -1,9 +1,13 @@
 from typing import Dict, List, Any, Optional
 from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool
 from context_manager import ContextManager
-from config import LLM_CONFIG, KAG_CONFIG
-import requests
+from config import LLM_CONFIG
+from utils.llm_utils import call_llm
+from utils.tool_utils import get_tools_schema_text, prepare_step_input_path
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 class WorkAgent:
     def __init__(self, context_manager: ContextManager):
@@ -22,24 +26,60 @@ class WorkAgent:
             return self._execute_single_plan(plan)
     
     def _execute_single_plan(self, plan: Dict) -> Dict[str, Any]:
-        steps = plan.get("steps", [])
+        """执行单任务计划"""
+        return self._execute_steps(plan.get("steps", []), plan)
+    
+    def _execute_sub_plans(self, plan: Dict) -> Dict[str, Any]:
+        """执行多任务计划"""
+        sub_plans = plan.get("sub_plans", [])
+        sub_results = []
+        all_success = True
+
+        for sub_plan in sub_plans:
+            unit = sub_plan.get("unit", "未知单位")
+            step_results = self._execute_steps(sub_plan.get("steps", []), sub_plan, unit=unit)
+            
+            if step_results.get("success"):
+                sub_results.append({
+                    "unit": unit,
+                    "success": True,
+                    "result_path": step_results.get("final_result_path"),
+                    "steps": step_results.get("results", [])
+                })
+            else:
+                all_success = False
+                sub_results.append({
+                    "unit": unit,
+                    "success": False,
+                    "error": step_results.get("error"),
+                    "result_path": None,
+                    "steps": step_results.get("results", [])
+                })
+
+        return {
+            "success": all_success,
+            "sub_results": sub_results,
+            "plan": plan
+        }
+    
+    def _execute_steps(self, steps: List[Dict], plan: Dict, unit: str = None) -> Dict[str, Any]:
+        """
+        执行步骤列表（公共逻辑）
+        
+        Args:
+            steps: 步骤列表
+            plan: 计划字典
+            unit: 单位名称（用于多任务模式）
+            
+        Returns:
+            执行结果字典
+        """
         results = []
         last_result_path = None
 
         for i, step in enumerate(steps):
-            tool_name = step.get("tool")
-            if last_result_path and tool_name and tool_name in self.tools:
-                tool = self.tools[tool_name]
-                tool_params = tool.parameters
-                if "input_geojson_path" in tool_params:
-                    if "params" not in step:
-                        step["params"] = {}
-                    if "input_geojson_path" not in step["params"] or not step["params"]["input_geojson_path"]:
-                        step["params"]["input_geojson_path"] = last_result_path
-            elif last_result_path and step.get("type") in ["elevation", "slope", "vegetation"]:
-                if "params" not in step:
-                    step["params"] = {}
-                step["params"]["input_geojson_path"] = last_result_path
+            # 准备链式调用的输入路径
+            prepare_step_input_path(step, last_result_path, self.tools)
 
             try:
                 step_result = self._execute_step(step)
@@ -49,22 +89,31 @@ class WorkAgent:
                     last_result_path = step_result["result"]["result_path"]
 
                 if not step_result.get("success", False):
+                    error_msg = f"执行步骤 {i+1} 时出错"
+                    if unit:
+                        error_msg = f"执行{unit}步骤 {i+1} 时出错"
+                    
                     return {
                         "success": False,
-                        "error": step_result.get("error"),
-                        "completed_steps": results
+                        "error": step_result.get("error") or error_msg,
+                        "completed_steps": results,
+                        "results": results
                     }
             except Exception as e:
                 import traceback
                 error_detail = traceback.format_exc()
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"执行步骤 {i+1} 时出错: {str(e)}")
+                error_msg = f"执行步骤 {i+1} 时出错: {str(e)}"
+                if unit:
+                    error_msg = f"执行{unit}步骤 {i+1} 时出错: {str(e)}"
+                
+                logger.error(error_msg)
                 logger.error(error_detail)
+                
                 return {
                     "success": False,
-                    "error": f"执行步骤 {i+1} 时出错: {str(e)}",
-                    "completed_steps": results
+                    "error": error_msg,
+                    "completed_steps": results,
+                    "results": results
                 }
 
         return {
@@ -72,79 +121,6 @@ class WorkAgent:
             "results": results,
             "plan": plan,
             "final_result_path": last_result_path
-        }
-    
-    def _execute_sub_plans(self, plan: Dict) -> Dict[str, Any]:
-        sub_plans = plan.get("sub_plans", [])
-        sub_results = []
-        all_success = True
-
-        for sub_plan in sub_plans:
-            unit = sub_plan.get("unit", "未知单位")
-            steps = sub_plan.get("steps", [])
-            results = []
-            last_result_path = None
-
-            for i, step in enumerate(steps):
-                tool_name = step.get("tool")
-                if last_result_path and tool_name and tool_name in self.tools:
-                    tool = self.tools[tool_name]
-                    tool_params = tool.parameters
-                    if "input_geojson_path" in tool_params:
-                        if "params" not in step:
-                            step["params"] = {}
-                        if "input_geojson_path" not in step["params"] or not step["params"]["input_geojson_path"]:
-                            step["params"]["input_geojson_path"] = last_result_path
-                elif last_result_path and step.get("type") in ["elevation", "slope", "vegetation"]:
-                    if "params" not in step:
-                        step["params"] = {}
-                    step["params"]["input_geojson_path"] = last_result_path
-
-                try:
-                    step_result = self._execute_step(step)
-                    results.append(step_result)
-
-                    if step_result.get("success") and step_result.get("result", {}).get("result_path"):
-                        last_result_path = step_result["result"]["result_path"]
-
-                    if not step_result.get("success", False):
-                        all_success = False
-                        sub_results.append({
-                            "unit": unit,
-                            "success": False,
-                            "error": step_result.get("error"),
-                            "result_path": None,
-                            "steps": results
-                        })
-                        break
-                except Exception as e:
-                    import traceback
-                    error_detail = traceback.format_exc()
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.error(f"执行{unit}步骤 {i+1} 时出错: {str(e)}")
-                    logger.error(error_detail)
-                    all_success = False
-                    sub_results.append({
-                        "unit": unit,
-                        "success": False,
-                        "error": f"执行步骤 {i+1} 时出错: {str(e)}",
-                        "result_path": None,
-                        "steps": results
-                    })
-                    break
-            else:
-                sub_results.append({
-                    "unit": unit,
-                    "success": True,
-                    "result_path": last_result_path,
-                    "steps": results
-                })
-
-        return {
-            "success": all_success,
-            "sub_results": sub_results,
-            "plan": plan
         }
 
     def _execute_step(self, step: Dict) -> Dict[str, Any]:
@@ -212,12 +188,7 @@ class WorkAgent:
     def _think(self, step: Dict, rag_context: List[Dict]) -> str:
         prompt = self.context_manager.load_static_context("work_prompt")
 
-        tools_schema = []
-        for tool_name, tool in self.tools.items():
-            schema = tool.get_schema()
-            tools_schema.append(json.dumps(schema, ensure_ascii=False, indent=2))
-
-        tools_schema_text = "\n\n".join(tools_schema)
+        tools_schema_text = get_tools_schema_text(self.tools)
         prompt_with_schema = f"{prompt}\n\n工具参数规范:\n{tools_schema_text}"
 
         rag_text = ""
@@ -240,7 +211,7 @@ class WorkAgent:
             {"role": "user", "content": user_content}
         ]
 
-        response = self._call_llm(messages)
+        response = call_llm(messages)
         return response
 
     def _extract_action(self, thought: str) -> Optional[Dict]:
@@ -292,13 +263,3 @@ class WorkAgent:
                 "error": error_msg
             }
 
-    def _call_llm(self, messages: List[Dict]) -> str:
-        payload = {
-            **LLM_CONFIG,
-            "messages": messages
-        }
-
-        response = requests.post(LLM_CONFIG["api_endpoint"], json=payload, timeout=LLM_CONFIG.get("timeout", 120))
-        response.raise_for_status()
-        result = response.json()
-        return result["choices"][0]["message"]["content"]

@@ -1,9 +1,8 @@
 from typing import Dict
 from context_manager import ContextManager
-from config import LLM_CONFIG, KAG_CONFIG
 from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, VegetationFilterTool
-import requests
-import json
+from utils.llm_utils import call_llm, parse_plan_response
+from utils.tool_utils import get_tools_schema_text
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,12 +26,7 @@ class PlanModule:
 
         prompt = self.context_manager.load_static_context("plan_prompt")
 
-        tools_schema = []
-        for tool_name, tool in self.tools.items():
-            schema = tool.get_schema()
-            tools_schema.append(json.dumps(schema, ensure_ascii=False, indent=2))
-
-        tools_schema_text = "\n\n".join(tools_schema)
+        tools_schema_text = get_tools_schema_text(self.tools)
         prompt_with_schema = f"{prompt}\n\n## 工具参数规范（动态获取）\n{tools_schema_text}"
 
         knowledge_text = ""
@@ -44,11 +38,11 @@ class PlanModule:
             {"role": "user", "content": f"任务: {user_task}{knowledge_text}"}
         ]
 
-        response = self._call_llm(messages)
+        response = call_llm(messages)
         logger.info(f"Plan阶段 - LLM响应长度: {len(response)}")
         logger.info(f"Plan阶段 - LLM响应前500字符: {response[:500]}")
 
-        plan = self._parse_plan(response)
+        plan = parse_plan_response(response)
 
         if "sub_plans" in plan:
             logger.info(f"Plan阶段 - 多任务模式，子计划数: {len(plan.get('sub_plans', []))}")
@@ -69,108 +63,3 @@ class PlanModule:
 
         return plan
 
-    def _call_llm(self, messages: list) -> str:
-        payload = {
-            **LLM_CONFIG,
-            "messages": messages
-        }
-
-        response = requests.post(LLM_CONFIG["api_endpoint"], json=payload, timeout=LLM_CONFIG.get("timeout", 120))
-        response.raise_for_status()
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
-
-    def _parse_plan(self, response: str) -> Dict:
-        import re
-
-        json_block_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', response)
-        if json_block_match:
-            try:
-                plan = json.loads(json_block_match.group(1))
-                
-                if "sub_plans" in plan:
-                    for sub_plan in plan.get("sub_plans", []):
-                        if "steps" not in sub_plan:
-                            sub_plan["steps"] = []
-                else:
-                    if "steps" not in plan:
-                        plan["steps"] = []
-                    if "estimated_steps" not in plan:
-                        plan["estimated_steps"] = len(plan.get("steps", []))
-
-                thinking_part = response[:json_block_match.start()].strip()
-
-                goal_value = str(plan.get("goal", ""))
-                if "<redacted" in goal_value.lower() or (thinking_part and len(goal_value) < len(thinking_part)):
-                    if thinking_part:
-                        if goal_value and "<redacted" not in goal_value.lower():
-                            plan["goal"] = thinking_part + "\n\n" + goal_value
-                        else:
-                            plan["goal"] = thinking_part
-                    elif goal_value:
-                        plan["goal"] = goal_value
-                elif thinking_part and not goal_value:
-                    plan["goal"] = thinking_part
-
-                return plan
-            except Exception as e:
-                logger.warning(f"解析JSON代码块失败: {e}")
-                pass
-
-        json_match = None
-        for match in re.finditer(r'\{[\s\S]*\}', response):
-            try:
-                test_json = json.loads(match.group())
-                json_match = match
-            except:
-                continue
-
-        if json_match:
-            try:
-                plan = json.loads(json_match.group())
-                
-                if "sub_plans" in plan:
-                    for sub_plan in plan.get("sub_plans", []):
-                        if "steps" not in sub_plan:
-                            sub_plan["steps"] = []
-                else:
-                    if "steps" not in plan:
-                        plan["steps"] = []
-                    if "estimated_steps" not in plan:
-                        plan["estimated_steps"] = len(plan.get("steps", []))
-
-                thinking_part = response[:json_match.start()].strip()
-
-                goal_value = str(plan.get("goal", ""))
-                if "<redacted" in goal_value.lower() or (thinking_part and len(goal_value) < len(thinking_part)):
-                    if thinking_part:
-                        if goal_value and "<redacted" not in goal_value.lower():
-                            plan["goal"] = thinking_part + "\n\n" + goal_value
-                        else:
-                            plan["goal"] = thinking_part
-                    elif goal_value:
-                        plan["goal"] = goal_value
-                elif thinking_part and not goal_value:
-                    plan["goal"] = thinking_part
-
-                return plan
-            except Exception as e:
-                logger.warning(f"解析JSON对象失败: {e}")
-                pass
-
-        steps = []
-        if "缓冲区" in response or "距离" in response:
-            steps.append({"step_id": 1, "description": "根据建筑和道路距离筛选空地", "type": "buffer", "params": {}})
-        if "高程" in response or "海拔" in response:
-            steps.append({"step_id": len(steps) + 1, "description": "根据高程范围筛选", "type": "elevation", "params": {}})
-        if "坡度" in response or "倾斜" in response:
-            steps.append({"step_id": len(steps) + 1, "description": "根据坡度范围筛选", "type": "slope", "params": {}})
-        if "植被" in response or "草地" in response or "林地" in response or "树木" in response or "耕地" in response or "裸地" in response or "水体" in response or "湿地" in response or "苔原" in response or "植被" in response or "稀疏植被" in response or "永久性水体" in response or "雪和冰" in response:
-            steps.append({"step_id": len(steps) + 1, "description": "根据植被类型筛选", "type": "vegetation", "params": {}})
-
-        return {
-            "task": "",
-            "goal": response,
-            "steps": steps,
-            "estimated_steps": len(steps)
-        }
