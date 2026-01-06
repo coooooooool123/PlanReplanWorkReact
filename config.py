@@ -11,7 +11,7 @@ LLM_CONFIG = {
     "top_p": 1.0,
     "n": 1,
     "stream": False,
-    "timeout": 180
+    "timeout": 800
 }
 
 PATHS = {

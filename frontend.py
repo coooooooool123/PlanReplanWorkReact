@@ -321,6 +321,14 @@ def main():
                             if equipment.get('metadata'):
                                 st.json(equipment.get('metadata'))
 
+                if plan.get('kag_reasoning_answer'):
+                    st.markdown("### 📚 知识库推理结果")
+                    st.info("以下内容来自知识图谱推理，展示了基于结构化知识的专业分析结果，证明数据可溯源。")
+                    with st.expander("查看知识库推理答案", expanded=True):
+                        kag_answer = plan.get('kag_reasoning_answer', '')
+                        # 将答案分段显示，提高可读性
+                        st.markdown(kag_answer)
+
                 st.markdown("---")
                 st.subheader("提出修改意见（可选）")
                 feedback = st.text_area(

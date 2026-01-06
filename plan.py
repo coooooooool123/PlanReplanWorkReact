@@ -4,6 +4,7 @@ from work.tools import BufferFilterTool, ElevationFilterTool, SlopeFilterTool, V
 from utils.llm_utils import call_llm, parse_plan_response
 from utils.tool_utils import get_tools_schema_text
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,36 @@ class PlanModule:
                     "text": ctx.get("text", ""),
                     "metadata": ctx.get("metadata", {})
                 })
+
+        # 获取KAG推理的最终答案
+        try:
+            kag_result = self.context_manager.query_with_kag_reasoning(user_task)
+            if kag_result and kag_result.get("answer"):
+                answer = kag_result.get("answer", "")
+                # 提取"Final Answer:"后面的内容
+                # 支持多种可能的格式：Final Answer:、Final Answer:、Final Answer等
+                final_answer_match = re.search(
+                    r'Final\s+Answer\s*:?\s*(.*)',
+                    answer,
+                    re.IGNORECASE | re.DOTALL
+                )
+                if final_answer_match:
+                    kag_answer = final_answer_match.group(1).strip()
+                    # 清理reference标记
+                    kag_answer = re.sub(r'<reference[^>]*></reference>', '', kag_answer)
+                    kag_answer = kag_answer.strip()
+                    if kag_answer:
+                        plan["kag_reasoning_answer"] = kag_answer
+                        logger.info(f"Plan阶段 - KAG推理答案已提取，长度: {len(kag_answer)}")
+                else:
+                    # 如果没有"Final Answer:"标记，直接使用整个答案（清理reference标记）
+                    clean_answer = re.sub(r'<reference[^>]*></reference>', '', answer)
+                    clean_answer = clean_answer.strip()
+                    if clean_answer:
+                        plan["kag_reasoning_answer"] = clean_answer
+                        logger.info(f"Plan阶段 - KAG推理答案已提取（无标记），长度: {len(clean_answer)}")
+        except Exception as e:
+            logger.warning(f"Plan阶段 - 获取KAG推理答案失败: {e}")
 
         return plan
 
