@@ -57,7 +57,7 @@ class ContextManager:
             
             # 先测试kag模块是否可以导入
             try:
-                import kag
+                import KAG.kag as kag
                 logger.debug(f"KAG模块导入成功，路径: {getattr(kag, '__file__', 'unknown')}")
             except ImportError as e:
                 logger.error(f"无法导入kag模块: {e}")
