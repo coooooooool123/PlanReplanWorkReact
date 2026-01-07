@@ -177,9 +177,16 @@ def create_map(gdf: gpd.GeoDataFrame) -> Optional[folium.Map]:
 
 def main():
     st.title("🤖 部署智能体系统")
+    
+    # 在顶部显示API文档链接
+    st.info(
+        f"📚 **API文档**: [Swagger UI]({API_URL}/docs) | [ReDoc]({API_URL}/redoc) | "
+        f"**API地址**: {API_URL}"
+    )
+    
     st.markdown("---")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["智能体任务", "历史结果", "数据库管理", "API接口"])
+    tab1, tab2, tab3 = st.tabs(["智能体任务", "历史结果", "实体-关系图"])
 
     with tab1:
         st.header("智能体任务流程")
@@ -707,493 +714,312 @@ def main():
             st.info("正在加载结果文件列表...")
 
     with tab3:
-        st.header("数据库管理")
+        st.header("实体-关系图")
 
-        if "selected_collection" not in st.session_state:
-            st.session_state.selected_collection = "knowledge"
-        if "db_data" not in st.session_state:
-            st.session_state.db_data = None
+        # 初始化session state
+        if "kg_data" not in st.session_state:
+            st.session_state.kg_data = None
+        if "kg_should_load" not in st.session_state:
+            st.session_state.kg_should_load = True
+        if "selected_entity_types" not in st.session_state:
+            st.session_state.selected_entity_types = []
+        if "selected_relation_types" not in st.session_state:
+            st.session_state.selected_relation_types = []
+        if "kg_search_term" not in st.session_state:
+            st.session_state.kg_search_term = ""
+        if "selected_node" not in st.session_state:
+            st.session_state.selected_node = None
 
-        st.markdown("---")
-        if "tab3_should_load" not in st.session_state:
-            st.session_state.tab3_should_load = False
-
-        col1, col2 = st.columns([2, 1])
+        # 控制栏
+        col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
-            selected_collection = st.selectbox(
-                "选择集合",
-                options=["knowledge", "equipment"],
-                index=["knowledge", "equipment"].index(st.session_state.selected_collection) if st.session_state.selected_collection in ["knowledge", "equipment"] else 0,
-                key="collection_selector"
+            search_term = st.text_input(
+                "搜索实体",
+                value=st.session_state.kg_search_term,
+                placeholder="输入实体名称进行搜索...",
+                key="kg_search_input"
             )
-            if selected_collection != st.session_state.selected_collection:
-                st.session_state.selected_collection = selected_collection
-                st.session_state.db_data = None
-                st.session_state.tab3_should_load = True
+            if search_term != st.session_state.kg_search_term:
+                st.session_state.kg_search_term = search_term
+                st.rerun()
+        
+        with col2:
+            if st.button("刷新数据", key="refresh_kg"):
+                st.session_state.kg_data = None
+                st.session_state.kg_should_load = True
+                st.rerun()
+        
+        with col3:
+            if st.button("重置筛选", key="reset_filters"):
+                st.session_state.selected_entity_types = []
+                st.session_state.selected_relation_types = []
+                st.session_state.kg_search_term = ""
                 st.rerun()
 
-        with col2:
-            # 清空集合按钮（带确认）
-            clear_confirm_key = f"clear_confirm_{st.session_state.selected_collection}"
-            if clear_confirm_key not in st.session_state:
-                st.session_state[clear_confirm_key] = False
-            
-            if not st.session_state[clear_confirm_key]:
-                if st.button("清空整个集合", key="clear_collection", type="secondary"):
-                    st.session_state[clear_confirm_key] = True
-                    st.rerun()
-            else:
-                st.warning(f"⚠️ 确认清空 {st.session_state.selected_collection} 集合？此操作不可恢复！")
-                col_yes, col_no = st.columns(2)
-                with col_yes:
-                    if st.button("确认清空", key="confirm_clear", type="primary"):
-                        with st.spinner(f"正在清空 {st.session_state.selected_collection} 集合..."):
-                            try:
-                                response = requests.delete(
-                                    f"{API_URL}/api/knowledge/clear/{st.session_state.selected_collection}",
-                                    timeout=API_TIMEOUT
-                                )
-                                if response.status_code == 200:
-                                    result = response.json()
-                                    if result.get("success"):
-                                        st.success(f"✓ {result.get('message', '集合已清空')}")
-                                        st.session_state.db_data = None
-                                        st.session_state[clear_confirm_key] = False
-                                        st.session_state.tab3_should_load = True
-                                        time.sleep(0.5)
-                                        st.rerun()
-                                    else:
-                                        st.error(f"清空失败: {result.get('message', '未知错误')}")
-                                        st.session_state[clear_confirm_key] = False
-                                else:
-                                    try:
-                                        error_detail = response.json()
-                                        error_msg = error_detail.get("detail", f"HTTP {response.status_code}")
-                                    except:
-                                        error_msg = response.text[:500] if response.text else f"HTTP {response.status_code}"
-                                    st.error(f"API请求失败: {error_msg}")
-                                    st.session_state[clear_confirm_key] = False
-                            except requests.exceptions.RequestException as e:
-                                st.error(f"连接API失败: {e}")
-                                st.session_state[clear_confirm_key] = False
-                with col_no:
-                    if st.button("取消", key="cancel_clear"):
-                        st.session_state[clear_confirm_key] = False
-                        st.rerun()
-
-        if st.session_state.selected_collection == "knowledge":
-            if st.button("批量更新（重新初始化军事单位规则）", type="primary"):
-                with st.spinner("正在更新knowledge集合..."):
-                    try:
-                        response = requests.put(
-                            f"{API_URL}/api/knowledge/update",
-                            timeout=API_TIMEOUT
-                        )
-                        if response.status_code == 200:
-                            result = response.json()
-                            if result.get("success"):
-                                st.success(f"✓ 已更新 {result.get('count', 0)} 条记录")
-                                st.session_state.db_data = None
-                                st.session_state.tab3_should_load = True
-                                st.rerun()
-                            else:
-                                st.error(f"更新失败: {result.get('message', '未知错误')}")
-                        else:
-                            st.error(f"API请求失败: {response.status_code}")
-                    except requests.exceptions.RequestException as e:
-                        st.error(f"连接API失败: {e}")
-
-        st.markdown("---")
-
-        should_load = (
-            st.session_state.tab3_should_load or 
-            (st.session_state.db_data is None and not st.session_state.tab3_should_load)
-        )
-
-        if should_load:
-            with st.spinner("正在加载数据..."):
+        # 加载数据
+        if st.session_state.kg_should_load or st.session_state.kg_data is None:
+            with st.spinner("正在从checkpoint加载知识图谱数据..."):
                 try:
                     response = requests.get(
-                        f"{API_URL}/api/knowledge",
-                        params={"collection": st.session_state.selected_collection},
-                        timeout=30
+                        f"{API_URL}/api/kg",
+                        timeout=60
                     )
                     if response.status_code == 200:
                         result = response.json()
                         if result.get("success"):
-                            st.session_state.db_data = result
-                            st.session_state.tab3_should_load = False
+                            st.session_state.kg_data = result
+                            st.session_state.kg_should_load = False
+                            st.success("数据加载成功！")
                         else:
-                            st.error("获取数据失败")
+                            st.error("获取知识图谱数据失败")
                     else:
                         st.error(f"API请求失败: {response.status_code}")
                 except requests.exceptions.RequestException as e:
                     st.error(f"连接API失败: {e}")
                     st.info("请确保后端服务已启动（运行 main.py）")
 
-        if st.session_state.db_data:
-            data = st.session_state.db_data
-            st.subheader(f"{st.session_state.selected_collection} 集合数据")
-            st.write(f"**总记录数**: {data.get('count', 0)}")
+        # 显示统计信息
+        if st.session_state.kg_data:
+            kg_data = st.session_state.kg_data
+            entities = kg_data.get("entities", [])
+            relations = kg_data.get("relations", [])
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("实体总数", kg_data.get("entity_count", len(entities)))
+            with col2:
+                st.metric("关系总数", kg_data.get("relation_count", len(relations)))
+            with col3:
+                # 统计实体类型
+                entity_types = {}
+                for entity in entities:
+                    entity_type = entity.get("type", "Unknown")
+                    entity_types[entity_type] = entity_types.get(entity_type, 0) + 1
+                st.metric("实体类型数", len(entity_types))
 
-            if data.get("count", 0) > 0:
-                items = data.get("items", [])
+            st.markdown("---")
 
-                search_term = st.text_input("搜索", key="db_search", placeholder="搜索文本内容...")
+            # 筛选控件
+            col1, col2 = st.columns(2)
+            with col1:
+                # 实体类型筛选
+                all_entity_types = sorted(set([e.get("type", "Unknown") for e in entities]))
+                selected_entity_types = st.multiselect(
+                    "筛选实体类型",
+                    options=all_entity_types,
+                    default=st.session_state.selected_entity_types,
+                    key="entity_type_filter"
+                )
+                if selected_entity_types != st.session_state.selected_entity_types:
+                    st.session_state.selected_entity_types = selected_entity_types
+                    st.rerun()
+            
+            with col2:
+                # 关系类型筛选
+                all_relation_types = sorted(set([r.get("type", "Unknown") for r in relations]))
+                selected_relation_types = st.multiselect(
+                    "筛选关系类型",
+                    options=all_relation_types,
+                    default=st.session_state.selected_relation_types,
+                    key="relation_type_filter"
+                )
+                if selected_relation_types != st.session_state.selected_relation_types:
+                    st.session_state.selected_relation_types = selected_relation_types
+                    st.rerun()
 
-                filtered_items = items
-                if search_term:
-                    filtered_items = [
-                        item for item in items
-                        if search_term.lower() in item.get("text", "").lower()
-                        or search_term.lower() in item.get("id", "").lower()
-                    ]
-                    st.write(f"**筛选结果**: {len(filtered_items)} 条")
+            # 应用筛选
+            filtered_entities = entities
+            filtered_relations = relations
 
-                for idx, item in enumerate(filtered_items):
-                    with st.expander(f"记录 {idx + 1}: {item.get('id', 'N/A')}", expanded=False):
-                        col1, col2 = st.columns([4, 1])
-                        with col1:
-                            st.write("**ID**:", item.get("id", "N/A"))
-                            st.write("**文本内容**:")
-                            st.text_area(
-                                "文本内容",
-                                value=item.get("text", ""),
-                                height=100,
-                                key=f"text_{item.get('id')}",
-                                disabled=True,
-                                label_visibility="collapsed"
+            if st.session_state.selected_entity_types:
+                filtered_entities = [
+                    e for e in entities 
+                    if e.get("type", "Unknown") in st.session_state.selected_entity_types
+                ]
+                # 只显示与筛选实体相关的关系
+                entity_ids = set([e.get("id") for e in filtered_entities])
+                filtered_relations = [
+                    r for r in relations
+                    if r.get("source") in entity_ids and r.get("target") in entity_ids
+                ]
+
+            if st.session_state.selected_relation_types:
+                filtered_relations = [
+                    r for r in filtered_relations
+                    if r.get("type", "Unknown") in st.session_state.selected_relation_types
+                ]
+                # 只显示与筛选关系相关的实体
+                related_entity_ids = set()
+                for r in filtered_relations:
+                    related_entity_ids.add(r.get("source"))
+                    related_entity_ids.add(r.get("target"))
+                filtered_entities = [
+                    e for e in filtered_entities
+                    if e.get("id") in related_entity_ids
+                ]
+
+            if st.session_state.kg_search_term:
+                search_lower = st.session_state.kg_search_term.lower()
+                filtered_entities = [
+                    e for e in filtered_entities
+                    if search_lower in e.get("name", "").lower() or search_lower in e.get("id", "").lower()
+                ]
+                entity_ids = set([e.get("id") for e in filtered_entities])
+                filtered_relations = [
+                    r for r in filtered_relations
+                    if r.get("source") in entity_ids and r.get("target") in entity_ids
+                ]
+
+            st.write(f"**显示**: {len(filtered_entities)} 个实体, {len(filtered_relations)} 个关系")
+
+            # 创建可视化
+            if filtered_entities or filtered_relations:
+                try:
+                    from pyvis.network import Network
+                    import tempfile
+
+                    # 创建网络图
+                    net = Network(
+                        height="600px",
+                        width="100%",
+                        bgcolor="#222222",
+                        font_color="white",
+                        directed=True
+                    )
+
+                    # 实体类型颜色映射
+                    entity_type_colors = {
+                        "MilitaryUnit": "#FF6B6B",
+                        "TerrainFeature": "#4ECDC4",
+                        "Weapon": "#FFE66D",
+                        "Obstacle": "#95E1D3",
+                        "DefensePosition": "#F38181",
+                        "CombatPosition": "#AA96DA",
+                        "UnitOrganization": "#FCBAD3",
+                        "CombatTask": "#A8E6CF",
+                        "FireSupport": "#FFD3A5",
+                        "ObservationPost": "#FD9853",
+                        "KillZone": "#A8DADC",
+                        "ObstacleBelt": "#457B9D",
+                        "SupportPoint": "#E63946",
+                        "ApproachRoute": "#F1FAEE"
+                    }
+
+                    # 添加节点
+                    entity_map = {}
+                    for entity in filtered_entities:
+                        entity_id = entity.get("id", "")
+                        entity_name = entity.get("name", entity_id)
+                        entity_type = entity.get("type", "Unknown")
+                        color = entity_type_colors.get(entity_type, "#888888")
+                        
+                        # 构建节点标题（显示详细信息）
+                        title = f"<b>{entity_name}</b><br>类型: {entity_type}<br>ID: {entity_id}"
+                        properties = entity.get("properties", {})
+                        if properties:
+                            title += "<br>属性:"
+                            for key, value in list(properties.items())[:5]:  # 只显示前5个属性
+                                title += f"<br>  {key}: {value}"
+                        
+                        # 高亮搜索匹配的节点
+                        node_color = "#FFD700" if st.session_state.kg_search_term and st.session_state.kg_search_term.lower() in entity_name.lower() else color
+                        
+                        net.add_node(
+                            entity_id,
+                            label=entity_name[:20],  # 限制标签长度
+                            title=title,
+                            color=node_color,
+                            size=20
+                        )
+                        entity_map[entity_id] = entity
+
+                    # 添加边
+                    for relation in filtered_relations:
+                        source = relation.get("source", "")
+                        target = relation.get("target", "")
+                        relation_type = relation.get("type", "Unknown")
+                        
+                        if source in entity_map and target in entity_map:
+                            net.add_edge(
+                                source,
+                                target,
+                                label=relation_type[:15],  # 限制标签长度
+                                title=relation_type,
+                                color="#888888",
+                                width=2
                             )
-                            st.write("**元数据**:")
-                            st.json(item.get("metadata", {}))
-                        with col2:
-                            delete_key = f"delete_confirm_{item.get('id')}"
-                            if delete_key not in st.session_state:
-                                st.session_state[delete_key] = False
 
-                            if not st.session_state[delete_key]:
-                                if st.button("删除", key=f"delete_{item.get('id')}", type="secondary"):
-                                    st.session_state[delete_key] = True
-                                    st.rerun()
-                            else:
-                                st.warning("确认删除？")
-                                col_yes, col_no = st.columns(2)
-                                with col_yes:
-                                    if st.button("确认", key=f"confirm_{item.get('id')}", type="primary"):
-                                        try:
-                                            delete_response = requests.delete(
-                                                f"{API_URL}/api/knowledge/{item.get('id')}",
-                                                params={"collection": st.session_state.selected_collection},
-                                                timeout=30
-                                            )
-                                            if delete_response.status_code == 200:
-                                                st.success("删除成功")
-                                                st.session_state.db_data = None
-                                                st.session_state[delete_key] = False
-                                                time.sleep(0.5)
-                                                st.rerun()
-                                            else:
-                                                st.error(f"删除失败: {delete_response.status_code}")
-                                                st.session_state[delete_key] = False
-                                        except requests.exceptions.RequestException as e:
-                                            st.error(f"删除请求失败: {e}")
-                                            st.session_state[delete_key] = False
-                                with col_no:
-                                    if st.button("取消", key=f"cancel_{item.get('id')}"):
-                                        st.session_state[delete_key] = False
-                                        st.rerun()
+                    # 配置物理引擎
+                    net.set_options("""
+                    {
+                      "physics": {
+                        "enabled": true,
+                        "barnesHut": {
+                          "gravitationalConstant": -2000,
+                          "centralGravity": 0.1,
+                          "springLength": 200,
+                          "springConstant": 0.04,
+                          "damping": 0.09
+                        },
+                        "stabilization": {
+                          "iterations": 100
+                        }
+                      },
+                      "interaction": {
+                        "hover": true,
+                        "tooltipDelay": 200,
+                        "zoomView": true,
+                        "dragView": true
+                      }
+                    }
+                    """)
+
+                    # 生成HTML到临时文件
+                    import tempfile
+                    import os
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8") as html_file:
+                        net.save_graph(html_file.name)
+                        html_path = html_file.name
+                    
+                    # 读取HTML内容并显示
+                    try:
+                        with open(html_path, "r", encoding="utf-8") as f:
+                            html_content = f.read()
+                        
+                        # 在Streamlit中显示
+                        st.components.v1.html(html_content, height=650, scrolling=True)
+                    finally:
+                        # 清理临时文件
+                        try:
+                            os.unlink(html_path)
+                        except:
+                            pass
+
+                except ImportError:
+                    st.error("pyvis库未安装，请运行: pip install pyvis")
+                    st.code("pip install pyvis", language="bash")
+                except Exception as e:
+                    st.error(f"生成可视化失败: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+
             else:
-                st.info("该集合暂无数据")
+                st.info("没有数据可显示。请调整筛选条件或确保checkpoint文件存在。")
 
-        st.markdown("---")
-        st.subheader("添加新数据")
+            # 节点详情面板
+            if st.session_state.selected_node:
+                st.markdown("---")
+                st.subheader("节点详情")
+                node_data = st.session_state.selected_node
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    st.write("**ID**:", node_data.get("id", "N/A"))
+                    st.write("**名称**:", node_data.get("name", "N/A"))
+                    st.write("**类型**:", node_data.get("type", "N/A"))
+                with col2:
+                    st.write("**属性**:")
+                    st.json(node_data.get("properties", {}))
 
-        with st.form("add_data_form"):
-            text_input = st.text_area(
-                "文本内容",
-                height=150,
-                placeholder="输入要添加到数据库的文本内容...",
-                key="add_text"
-            )
-
-            metadata_input = st.text_area(
-                "元数据（JSON格式）",
-                height=100,
-                placeholder='{"unit": "单位名", "type": "deployment_rule"}',
-                key="add_metadata"
-            )
-
-            submitted = st.form_submit_button("添加数据", type="primary")
-
-            if submitted:
-                if not text_input.strip():
-                    st.error("请输入文本内容")
-                else:
-                    metadata = {}
-                    if metadata_input.strip():
-                        try:
-                            metadata = json.loads(metadata_input)
-                        except json.JSONDecodeError:
-                            st.error("元数据格式错误，请输入有效的JSON格式")
-                            st.stop()
-
-                    with st.spinner("正在添加数据..."):
-                        try:
-                            response = requests.post(
-                                f"{API_URL}/api/knowledge",
-                                json={
-                                    "text": text_input,
-                                    "metadata": metadata,
-                                    "collection": st.session_state.selected_collection
-                                },
-                                timeout=30
-                            )
-                            if response.status_code == 200:
-                                result = response.json()
-                                if result.get("success"):
-                                    st.success(f"✓ 数据已添加，ID: {result.get('id')}")
-                                    st.session_state.db_data = None
-                                    time.sleep(0.5)
-                                    st.rerun()
-                                else:
-                                    st.error(f"添加失败: {result.get('message', '未知错误')}")
-                            else:
-                                try:
-                                    error_detail = response.json()
-                                    error_msg = error_detail.get("detail", f"HTTP {response.status_code}")
-                                except:
-                                    error_msg = response.text[:500] if response.text else f"HTTP {response.status_code}"
-                                st.error(f"API请求失败: {error_msg}")
-                        except requests.exceptions.RequestException as e:
-                            st.error(f"连接API失败: {e}")
-
-    with tab4:
-        st.header("API接口文档")
-        st.markdown("""
-
-        **功能**: 根据用户任务描述生成执行计划
-
-        **请求体**:
-        ```json
-        {
-            "task": "任务描述"
-        }
-        ```
-
-        **返回**:
-        ```json
-        {
-            "success": true,
-            "result": {
-                "plan": {
-                    "task": "任务描述",
-                    "goal": "任务目标",
-                    "steps": [...],
-                    "estimated_steps": 2
-                }
-            },
-            "message": "计划生成完成"
-        }
-        ```
-
-        **功能**: 根据用户反馈或执行失败情况重新规划
-
-        **请求体**:
-        ```json
-        {
-            "plan": {...},
-            "feedback": "修改意见"
-        }
-        ```
-
-        **返回**:
-        ```json
-        {
-            "success": true,
-            "result": {
-                "plan": {...}
-            },
-            "message": "重新规划完成"
-        }
-        ```
-
-        **功能**: 执行已生成的计划
-
-        **请求体**:
-        ```json
-        {
-            "plan": {...}
-        }
-        ```
-
-        **返回**:
-        ```json
-        {
-            "success": true,
-            "result": {
-                "result": {
-                    "success": true,
-                    "final_result_path": "result/xxx.geojson",
-                    "results": [...]
-                }
-            },
-            "message": "执行完成"
-        }
-        ```
-
-        **功能**: 一次性完成计划生成和执行（跳过审查步骤）
-
-        **请求体**:
-        ```json
-        {
-            "task": "任务描述"
-        }
-        ```
-
-        **返回**: 同 `/api/execute` 接口
-
-        **功能**: 获取系统中所有可用的工具及其参数说明
-
-        **返回**:
-        ```json
-        {
-            "tools": {
-                "buffer_filter_tool": {
-                    "name": "buffer_filter_tool",
-                    "description": "...",
-                    "parameters": {...}
-                },
-                ...
-            }
-        }
-        ```
-
-        **功能**: 获取result目录下所有GeoJSON结果文件的列表
-
-        **返回**:
-        ```json
-        {
-            "success": true,
-            "results": [
-                {
-                    "filename": "xxx.geojson",
-                    "size": 12345,
-                    "modified_time": 1234567890,
-                    "modified_time_str": "2025-01-01 12:00:00"
-                }
-            ],
-            "count": 1
-        }
-        ```
-
-        **功能**: 下载指定的GeoJSON结果文件
-
-        **路径参数**: `filename` - 文件名（如 `buffer_filter_500m_20251223.geojson`）
-
-        **返回**: GeoJSON文件内容（Content-Type: application/geo+json）
-
-        **功能**: 获取ChromaDB中所有集合的基本信息
-
-        **返回**:
-        ```json
-        {
-            "success": true,
-            "collections": {
-                "knowledge": {
-                    "name": "knowledge",
-                    "count": 10
-                },
-            }
-        }
-        ```
-
-        **功能**: 获取指定集合中的所有记录
-
-        **查询参数**: 
-        - `collection` (可选): 集合名称，可选值: `knowledge`、`equipment`，默认: `knowledge`
-
-        **返回**:
-        ```json
-        {
-            "success": true,
-            "collection": "knowledge",
-            "count": 10,
-            "items": [
-                {
-                    "id": "knowledge_0",
-                    "text": "文本内容",
-                    "metadata": {...}
-                }
-            ]
-        }
-        ```
-
-        **功能**: 向指定集合添加新记录
-
-        **请求体**:
-        ```json
-        {
-            "text": "文本内容",
-            "metadata": {
-                "unit": "单位名",
-                "type": "deployment_rule"
-            },
-            "collection": "knowledge"
-        }
-        ```
-
-        **返回**:
-        ```json
-        {
-            "success": true,
-            "message": "数据已添加到knowledge集合",
-            "id": "knowledge_10"
-        }
-        ```
-
-        **功能**: 从指定集合中删除指定记录
-
-        **路径参数**: `id` - 记录ID
-
-        **查询参数**: 
-        - `collection` (可选): 集合名称，默认: `knowledge`
-
-        **返回**:
-        ```json
-        {
-            "success": true,
-            "message": "记录 xxx 已从knowledge集合删除"
-        }
-        ```
-
-        **功能**: 重新初始化knowledge集合，批量更新军事单位部署规则
-
-        **返回**:
-        ```json
-        {
-            "success": true,
-            "message": "knowledge集合已更新",
-            "count": 10
-        }
-        ```
-
-        **功能**: 获取API服务的基本信息和所有可用端点列表
-
-        **功能**: 检查API服务是否正常运行
-
-        **返回**:
-        ```json
-        {
-            "status": "healthy"
-        }
-        ```
-
-        - **API地址**: http://localhost:8000
-        - **交互式API文档**: http://localhost:8000/docs (Swagger UI)
-        - **ReDoc文档**: http://localhost:8000/redoc
-        - **超时设置**: 建议前端设置超时时间大于180秒（LLM请求超时时间）
-        - **错误处理**: 所有接口在出错时返回HTTP状态码和错误详情
-        """)
 
 if __name__ == "__main__":
     main()

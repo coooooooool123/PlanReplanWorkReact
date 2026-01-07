@@ -84,28 +84,48 @@ class TaskResponse(BaseModel):
 
 @app.get("/")
 async def root():
+    """API服务根路径，返回服务信息和文档链接"""
     return {
         "service": "空地智能体API服务",
         "version": "1.0.0",
-        "endpoints": {
-            "/api/plan": "POST - 生成计划",
-            "/api/replan": "POST - 根据反馈重新规划",
-            "/api/execute": "POST - 执行计划",
-            "/api/task": "POST - 提交任务（完整流程）",
-            "/api/tools": "GET - 获取工具列表",
-            "/api/kg": "GET - 获取知识图谱信息（实体和关系统计）",
-            "/api/kg/entities": "GET - 获取实体列表",
-            "/api/kg/relations": "GET - 获取关系列表",
-            "/api/kag/query": "POST - 使用KAG推理能力回答问题",
-            "/api/knowledge/update": "PUT - 批量更新knowledge集合",
-            "/api/results": "GET - 获取所有结果文件列表",
-            "/api/results/{filename}": "GET - 获取特定结果文件内容",
-            "/docs": "GET - API文档"
-        }
+        "description": "空地计算智能体系统的RESTful API接口",
+        "documentation": {
+            "swagger_ui": "/docs",
+            "redoc": "/redoc",
+            "openapi_json": "/openapi.json"
+        },
+        "main_endpoints": {
+            "智能体任务": {
+                "/api/plan": "POST - 生成执行计划",
+                "/api/replan": "POST - 根据反馈重新规划",
+                "/api/execute": "POST - 执行计划",
+                "/api/task": "POST - 完整流程（规划+执行）"
+            },
+            "知识图谱": {
+                "/api/kg": "GET - 获取知识图谱信息（实体和关系统计）",
+                "/api/kg/entities": "GET - 获取实体列表（支持类型筛选）",
+                "/api/kg/relations": "GET - 获取关系列表（支持类型筛选）",
+                "/api/kag/query": "POST - 使用KAG推理能力回答问题"
+            },
+            "结果文件": {
+                "/api/results": "GET - 获取所有结果文件列表",
+                "/api/results/{filename}": "GET - 获取特定结果文件内容"
+            },
+            "工具与系统": {
+                "/api/tools": "GET - 获取所有可用工具列表"
+            }
+        },
+        "note": "完整的API文档、请求/响应示例和交互式测试，请访问 /docs (Swagger UI) 或 /redoc"
     }
 
-@app.post("/api/plan", response_model=TaskResponse)
+@app.post("/api/plan", response_model=TaskResponse, tags=["智能体任务"])
 async def generate_plan(request: PlanRequest):
+    """
+    生成执行计划
+    
+    根据用户任务描述，使用LLM和KAG知识图谱推理生成详细的执行计划。
+    计划包含任务目标、执行步骤、工具参数等信息。
+    """
     try:
         result = get_orchestrator().generate_plan(request.task)
         return TaskResponse(
@@ -125,8 +145,14 @@ async def generate_plan(request: PlanRequest):
 
         raise HTTPException(status_code=500, detail=f"生成计划时出错: {error_msg}")
 
-@app.post("/api/replan", response_model=TaskResponse)
+@app.post("/api/replan", response_model=TaskResponse, tags=["智能体任务"])
 async def replan_with_feedback(request: ReplanRequest):
+    """
+    根据反馈重新规划
+    
+    根据用户反馈或执行失败情况，重新生成执行计划。
+    系统会分析反馈内容，调整计划步骤和参数。
+    """
     try:
         import traceback
         import logging
@@ -160,8 +186,14 @@ async def replan_with_feedback(request: ReplanRequest):
             detail=f"重新规划时出错: {error_msg}"
         )
 
-@app.post("/api/execute", response_model=TaskResponse)
+@app.post("/api/execute", response_model=TaskResponse, tags=["智能体任务"])
 async def execute_plan(request: ExecuteRequest):
+    """
+    执行计划
+    
+    按照生成的计划执行所有步骤，调用相应的工具（如缓冲区筛选、高程筛选等），
+    最终生成GeoJSON格式的结果文件。
+    """
     try:
         result = get_orchestrator().execute_plan(request.plan)
         return TaskResponse(
@@ -181,8 +213,14 @@ async def execute_plan(request: ExecuteRequest):
 
         raise HTTPException(status_code=500, detail=f"执行计划时出错: {error_msg}")
 
-@app.post("/api/task", response_model=TaskResponse)
+@app.post("/api/task", response_model=TaskResponse, tags=["智能体任务"])
 async def submit_task(request: TaskRequest):
+    """
+    提交任务（完整流程）
+    
+    一次性完成计划生成和执行，跳过审查步骤。
+    适用于自动化场景或不需要人工审查的情况。
+    """
     try:
         result = get_orchestrator().execute_task(request.task)
         return TaskResponse(
@@ -193,8 +231,17 @@ async def submit_task(request: TaskRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"执行任务时出错: {str(e)}")
 
-@app.get("/api/tools")
+@app.get("/api/tools", tags=["工具与系统"])
 async def get_tools():
+    """
+    获取所有可用工具列表
+    
+    返回系统中所有可用的工具及其参数说明，包括：
+    - buffer_filter_tool: 缓冲区筛选
+    - elevation_filter_tool: 高程筛选
+    - slope_filter_tool: 坡度筛选
+    - vegetation_filter_tool: 植被筛选
+    """
     tools = {}
     for name, tool in get_orchestrator().work_agent.tools.items():
         tools[name] = {
@@ -204,13 +251,19 @@ async def get_tools():
         }
     return {"tools": tools}
 
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
 
-@app.get("/api/kg")
+@app.get("/api/kg", tags=["知识图谱"])
 async def get_kg_info():
-    """获取知识图谱基本信息（实体和关系统计）"""
+    """
+    获取知识图谱基本信息
+    
+    返回知识图谱的实体和关系统计信息，包括：
+    - 实体总数和关系总数
+    - 所有实体列表（包含ID、名称、类型、属性）
+    - 所有关系列表（包含源实体、目标实体、关系类型、属性）
+    
+    数据来源：KAG checkpoint文件
+    """
     try:
         kg_data = get_context_manager().get_kg_data()
         
@@ -225,9 +278,17 @@ async def get_kg_info():
         logger.error(f"获取知识图谱信息失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取知识图谱信息失败: {str(e)}")
 
-@app.get("/api/kg/entities")
+@app.get("/api/kg/entities", tags=["知识图谱"])
 async def get_kg_entities(entity_type: str = None, limit: int = 100):
-    """获取知识图谱实体列表"""
+    """
+    获取知识图谱实体列表
+    
+    查询参数：
+    - entity_type: 可选，按实体类型筛选（如 "MilitaryUnit", "TerrainFeature"）
+    - limit: 可选，限制返回数量，默认100
+    
+    返回指定类型或所有类型的实体列表。
+    """
     try:
         kg_data = get_context_manager().get_kg_data()
         entities = kg_data.get("entities", [])
@@ -248,9 +309,17 @@ async def get_kg_entities(entity_type: str = None, limit: int = 100):
         logger.error(f"获取知识图谱实体失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取实体失败: {str(e)}")
 
-@app.get("/api/kg/relations")
+@app.get("/api/kg/relations", tags=["知识图谱"])
 async def get_kg_relations(relation_type: str = None, limit: int = 100):
-    """获取知识图谱关系列表"""
+    """
+    获取知识图谱关系列表
+    
+    查询参数：
+    - relation_type: 可选，按关系类型筛选（如 "deployedAt", "suitableFor"）
+    - limit: 可选，限制返回数量，默认100
+    
+    返回指定类型或所有类型的关系列表。
+    """
     try:
         kg_data = get_context_manager().get_kg_data()
         relations = kg_data.get("relations", [])
@@ -302,15 +371,29 @@ async def update_knowledge_base():
         detail="此接口已废弃。请使用KAG开发者模式来构建知识库。"
     )
 
-@app.post("/api/kag/query")
+@app.post("/api/kag/query", tags=["知识图谱"])
 async def kag_query(request: Dict = Body(...)):
     """
     使用KAG推理能力回答问题
     
+    基于知识图谱进行推理问答，返回结构化答案和引用来源。
+    
     请求体：
+    ```json
     {
         "question": "轻步兵应该部署在什么位置？"
     }
+    ```
+    
+    返回：
+    ```json
+    {
+        "success": true,
+        "answer": "推理答案...",
+        "references": ["引用1", "引用2"],
+        "method": "kag_reasoning"
+    }
+    ```
     """
     try:
         question = request.get("question", "")
@@ -330,9 +413,18 @@ async def kag_query(request: Dict = Body(...)):
         logger.error(f"KAG推理查询失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"KAG推理查询失败: {str(e)}")
 
-@app.get("/api/results")
+@app.get("/api/results", tags=["结果文件"])
 async def get_results_list():
-    """获取所有结果文件列表"""
+    """
+    获取所有结果文件列表
+    
+    返回result目录下所有GeoJSON结果文件的列表，包含：
+    - 文件名
+    - 文件大小
+    - 修改时间
+    
+    文件按修改时间倒序排列（最新的在前）。
+    """
     try:
         result_dir = PATHS["result_dir"]
         if not result_dir.exists():
@@ -364,9 +456,18 @@ async def get_results_list():
         logger.error(f"获取结果文件列表失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取结果文件列表失败: {str(e)}")
 
-@app.get("/api/results/{filename}")
+@app.get("/api/results/{filename}", tags=["结果文件"])
 async def get_result_file(filename: str):
-    """获取特定结果文件内容（GeoJSON）"""
+    """
+    获取特定结果文件内容
+    
+    下载指定的GeoJSON结果文件。
+    
+    路径参数：
+    - filename: 文件名（如 `buffer_filter_500m_20251223.geojson`）
+    
+    返回GeoJSON文件内容（Content-Type: application/geo+json）
+    """
     try:
         result_dir = PATHS["result_dir"]
         file_path = result_dir / filename
